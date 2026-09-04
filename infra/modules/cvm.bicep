@@ -18,7 +18,7 @@ param adminPassword string
 param workloadSubnetId string
 
 @description('Confidential VM size (AMD SEV-SNP).')
-param vmSize string = 'Standard_DC2ads_v5'
+param vmSize string = 'Standard_DC2as_v6'
 
 var vmName = '${namePrefix}-cvm'
 var nicName = '${vmName}-nic'

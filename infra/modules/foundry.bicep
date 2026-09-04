@@ -39,7 +39,8 @@ resource fdyKv 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
       name: 'standard'
     }
     tenantId: subscription().tenantId
-    enableRbacAuthorization: true
+    enableRbacAuthorization: false
+    accessPolicies: []
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
   }
