@@ -2,6 +2,9 @@
 
 The Azure public-cloud side of the "Master the Environment, Extend the Scale" sovereign hybrid architecture. Azure Local Disconnected Operations (ALDO) side will bolt on when the Tokyo WKLD stamp is ready.
 
+**Live deployment status:** see [`docs/deployment-status.md`](docs/deployment-status.md).  
+**Executive summary + diagrams:** see [`docs/executive-summary.md`](docs/executive-summary.md).
+
 ## What this deploys
 
 Everything into a single resource group **`ACX-HTX`** in **West US 2**, tagged `Project=HTX` and `Created By=Michael Godfrey`. **No public IPs.** All workloads attach to the existing VNet **`AC-Managment-WUS2`** (RG `AdaptiveCloud-Management`), subnet `Default`. Key Vault and Storage use **private endpoints** and have public network access **disabled**.

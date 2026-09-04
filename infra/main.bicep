@@ -27,6 +27,12 @@ param existingVnetName string = 'AC-Managment-WUS2'
 @description('Subnet name inside the existing VNet for the CVM NIC and private endpoints.')
 param workloadSubnetName string = 'Default'
 
+@description('Deploy the Confidential VM. Requires SEV-SNP CVM SKU availability in region (DCasv5/v6). Currently blocked in westus2 for this subscription — SKU family not offered on the assigned hardware cluster.')
+param deployCvm bool = false
+
+@description('Deploy the AI Foundry hub + project. Blocked pending resolution of ML workspace RP access-policy write permission on the shared Key Vault.')
+param deployFoundry bool = false
+
 @description('Tags applied to the resource group and every resource.')
 param tags object = {
   Project: 'HTX'
@@ -77,7 +83,7 @@ module storage 'modules/storage.bicep' = {
   }
 }
 
-module cvm 'modules/cvm.bicep' = {
+module cvm 'modules/cvm.bicep' = if (deployCvm) {
   scope: rg
   name: 'cvm-deploy'
   params: {
@@ -90,7 +96,7 @@ module cvm 'modules/cvm.bicep' = {
   }
 }
 
-module foundry 'modules/foundry.bicep' = {
+module foundry 'modules/foundry.bicep' = if (deployFoundry) {
   scope: rg
   name: 'foundry-deploy'
   params: {
@@ -105,9 +111,9 @@ output keyVaultName string = keyvault.outputs.keyVaultName
 output kekName string = keyvault.outputs.kekName
 output storageAccountName string = storage.outputs.storageAccountName
 output coldContainerName string = storage.outputs.coldContainerName
-output cvmName string = cvm.outputs.cvmName
-output cvmPrincipalId string = cvm.outputs.cvmPrincipalId
-output cvmPrivateIp string = cvm.outputs.privateIpAddress
-output foundryHubName string = foundry.outputs.hubName
-output foundryProjectName string = foundry.outputs.projectName
+output cvmName string = deployCvm ? cvm.outputs.cvmName : ''
+output cvmPrincipalId string = deployCvm ? cvm.outputs.cvmPrincipalId : ''
+output cvmPrivateIp string = deployCvm ? cvm.outputs.privateIpAddress : ''
+output foundryHubName string = deployFoundry ? foundry.outputs.hubName : ''
+output foundryProjectName string = deployFoundry ? foundry.outputs.projectName : ''
 

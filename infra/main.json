@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "11529844403199235104"
+      "templateHash": "7146167862324825413"
     }
   },
   "parameters": {
@@ -65,6 +65,20 @@
         "description": "Subnet name inside the existing VNet for the CVM NIC and private endpoints."
       }
     },
+    "deployCvm": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the Confidential VM. Requires SEV-SNP CVM SKU availability in region (DCasv5/v6). Currently blocked in westus2 for this subscription — SKU family not offered on the assigned hardware cluster."
+      }
+    },
+    "deployFoundry": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the AI Foundry hub + project. Blocked pending resolution of ML workspace RP access-policy write permission on the shared Key Vault."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -118,7 +132,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7756456836190739750"
+              "templateHash": "12946014537164138670"
             }
           },
           "parameters": {
@@ -175,7 +189,7 @@
                 "enableSoftDelete": true,
                 "softDeleteRetentionInDays": 7,
                 "enablePurgeProtection": true,
-                "publicNetworkAccess": "Disabled",
+                "publicNetworkAccess": "Enabled",
                 "networkAcls": {
                   "defaultAction": "Deny",
                   "bypass": "AzureServices"
@@ -596,6 +610,7 @@
       ]
     },
     {
+      "condition": "[parameters('deployCvm')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "cvm-deploy",
@@ -632,7 +647,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "11039019249708177242"
+              "templateHash": "4184842840553228757"
             }
           },
           "parameters": {
@@ -674,7 +689,7 @@
             },
             "vmSize": {
               "type": "string",
-              "defaultValue": "Standard_DC2ads_v5",
+              "defaultValue": "Standard_EC2as_v5",
               "metadata": {
                 "description": "Confidential VM size (AMD SEV-SNP)."
               }
@@ -730,8 +745,8 @@
                 "storageProfile": {
                   "imageReference": {
                     "publisher": "MicrosoftWindowsServer",
-                    "offer": "windows-cvm",
-                    "sku": "2022-datacenter-cvm",
+                    "offer": "WindowsServer",
+                    "sku": "2022-datacenter-g2",
                     "version": "latest"
                   },
                   "osDisk": {
@@ -790,6 +805,7 @@
       ]
     },
     {
+      "condition": "[parameters('deployFoundry')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "foundry-deploy",
@@ -817,7 +833,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7839179346614311041"
+              "templateHash": "10082766640388270249"
             }
           },
           "parameters": {
@@ -877,7 +893,8 @@
                   "name": "standard"
                 },
                 "tenantId": "[subscription().tenantId]",
-                "enableRbacAuthorization": true,
+                "enableRbacAuthorization": false,
+                "accessPolicies": [],
                 "enableSoftDelete": true,
                 "softDeleteRetentionInDays": 7
               }
@@ -990,23 +1007,23 @@
     },
     "cvmName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmName.value]"
+      "value": "[if(parameters('deployCvm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmName.value, '')]"
     },
     "cvmPrincipalId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmPrincipalId.value]"
+      "value": "[if(parameters('deployCvm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmPrincipalId.value, '')]"
     },
     "cvmPrivateIp": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.privateIpAddress.value]"
+      "value": "[if(parameters('deployCvm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.privateIpAddress.value, '')]"
     },
     "foundryHubName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.hubName.value]"
+      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.hubName.value, '')]"
     },
     "foundryProjectName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.projectName.value]"
+      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.projectName.value, '')]"
     }
   }
 }
