@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Azure region for all resources.')
-param location string = 'eastus2'
+param location string = 'westus2'
 
 @description('Resource group name.')
 param resourceGroupName string = 'ACX-HTX'

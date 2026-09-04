@@ -10,7 +10,7 @@ param(
     [Parameter(Mandatory)][string]$SubscriptionId,
     [Parameter(Mandatory)][SecureString]$CvmAdminPassword,
     [Parameter(Mandatory)][string]$AllowedSourceIp,
-    [string]$Location = 'eastus2',
+    [string]$Location = 'westus2',
     [switch]$WhatIf
 )
 

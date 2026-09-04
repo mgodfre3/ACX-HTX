@@ -4,7 +4,7 @@ The Azure public-cloud side of the "Master the Environment, Extend the Scale" so
 
 ## What this deploys
 
-Everything into a single resource group **`ACX-HTX`** in **East US 2**, tagged `Project=HTX` and `Created By=Michael Godfrey`.
+Everything into a single resource group **`ACX-HTX`** in **West US 2**, tagged `Project=HTX` and `Created By=Michael Godfrey`.
 
 | # | Resource | Purpose |
 |---|---|---|
@@ -17,7 +17,7 @@ Everything into a single resource group **`ACX-HTX`** in **East US 2**, tagged `
 
 - Azure CLI 2.60+ with Bicep
 - Subscription with Owner or Contributor + User Access Administrator
-- DCadsv5 quota in East US 2 (check with `az vm list-usage -l eastus2 -o table | Select-String DCads`)
+- DCadsv5 quota in West US 2 (check with `az vm list-usage -l westus2 -o table | Select-String DCads`)
 
 ## Deploy
 
@@ -28,13 +28,13 @@ az account set --subscription <sub-id>
 
 # Preview
 az deployment sub what-if `
-  --location eastus2 `
+  --location westus2 `
   --template-file infra/main.bicep `
   --parameters infra/main.bicepparam
 
 # Deploy
 az deployment sub create `
-  --location eastus2 `
+  --location westus2 `
   --template-file infra/main.bicep `
   --parameters infra/main.bicepparam `
   --name acx-htx-$(Get-Date -Format yyyyMMdd-HHmm)
@@ -45,7 +45,7 @@ az deployment sub create `
 ```powershell
 az group delete --name ACX-HTX --yes --no-wait
 # Purge soft-deleted Key Vault + Managed HSM keys
-az keyvault purge --name <kv-name> --location eastus2
+az keyvault purge --name <kv-name> --location westus2
 ```
 
 ## Layout
