@@ -16,8 +16,12 @@ param kekName string
 @description('User-assigned MI resource ID used for storage CMK.')
 param storageIdentityId string
 
+@description('Subnet resource ID for the private endpoint.')
+param workloadSubnetId string
+
 var storageName = toLower('${namePrefix}stg${uniqueString(resourceGroup().id)}')
 var trimmedName = length(storageName) > 24 ? substring(storageName, 0, 24) : storageName
+var peName = '${trimmedName}-blob-pe'
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: trimmedName
@@ -37,8 +41,12 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
     accessTier: 'Hot'
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+    }
     encryption: {
       identity: {
         userAssignedIdentity: storageIdentityId
@@ -81,6 +89,27 @@ resource coldContainer 'Microsoft.Storage/storageAccounts/blobServices/container
   }
 }
 
+resource pe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: peName
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: workloadSubnetId
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'stg-blob-plsc'
+        properties: {
+          privateLinkServiceId: storage.id
+          groupIds: [ 'blob' ]
+        }
+      }
+    ]
+  }
+}
+
 output storageAccountName string = storage.name
 output storageAccountId string = storage.id
 output coldContainerName string = coldContainer.name
+output privateEndpointId string = pe.id

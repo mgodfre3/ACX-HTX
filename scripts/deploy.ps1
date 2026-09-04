@@ -9,7 +9,6 @@
 param(
     [Parameter(Mandatory)][string]$SubscriptionId,
     [Parameter(Mandatory)][SecureString]$CvmAdminPassword,
-    [Parameter(Mandatory)][string]$AllowedSourceIp,
     [string]$Location = 'westus2',
     [switch]$WhatIf
 )
@@ -23,7 +22,6 @@ $plainPw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($CvmAdminPassword))
 
 $env:CVM_ADMIN_PASSWORD = $plainPw
-$env:ALLOWED_SOURCE_IP = $AllowedSourceIp
 
 $deploymentName = "acx-htx-$(Get-Date -Format yyyyMMdd-HHmm)"
 
@@ -47,6 +45,5 @@ az deployment sub $op `
 
 # Scrub env
 Remove-Item Env:CVM_ADMIN_PASSWORD -ErrorAction SilentlyContinue
-Remove-Item Env:ALLOWED_SOURCE_IP -ErrorAction SilentlyContinue
 
 Write-Host "Done." -ForegroundColor Green

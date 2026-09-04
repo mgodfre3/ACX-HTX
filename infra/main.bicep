@@ -1,4 +1,4 @@
-targetScope = 'subscription'
+﻿targetScope = 'subscription'
 
 @description('Azure region for all resources.')
 param location string = 'westus2'
@@ -18,14 +18,22 @@ param cvmAdminUsername string
 @description('Admin password for the Confidential VM. Must satisfy Windows password complexity.')
 param cvmAdminPassword string
 
-@description('Source IP prefix allowed to RDP / hit the CVM demo endpoint. Use your workstation public IP or a small CIDR.')
-param allowedSourceIpPrefix string
+@description('Resource group of the existing VNet.')
+param existingVnetResourceGroup string = 'AdaptiveCloud-Management'
+
+@description('Existing VNet name to attach workloads and private endpoints to.')
+param existingVnetName string = 'AC-Managment-WUS2'
+
+@description('Subnet name inside the existing VNet for the CVM NIC and private endpoints.')
+param workloadSubnetName string = 'Default'
 
 @description('Tags applied to the resource group and every resource.')
 param tags object = {
   Project: 'HTX'
   'Created By': 'Michael Godfrey'
 }
+
+var workloadSubnetId = resourceId(existingVnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', existingVnetName, workloadSubnetName)
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName
@@ -40,6 +48,7 @@ module keyvault 'modules/keyvault.bicep' = {
     location: location
     namePrefix: namePrefix
     tags: tags
+    workloadSubnetId: workloadSubnetId
   }
 }
 
@@ -64,6 +73,7 @@ module storage 'modules/storage.bicep' = {
     keyVaultUri: keyvault.outputs.keyVaultUri
     kekName: keyvault.outputs.kekName
     storageIdentityId: identity.outputs.storageIdentityId
+    workloadSubnetId: workloadSubnetId
   }
 }
 
@@ -76,7 +86,7 @@ module cvm 'modules/cvm.bicep' = {
     tags: tags
     adminUsername: cvmAdminUsername
     adminPassword: cvmAdminPassword
-    allowedSourceIpPrefix: allowedSourceIpPrefix
+    workloadSubnetId: workloadSubnetId
   }
 }
 
@@ -97,6 +107,7 @@ output storageAccountName string = storage.outputs.storageAccountName
 output coldContainerName string = storage.outputs.coldContainerName
 output cvmName string = cvm.outputs.cvmName
 output cvmPrincipalId string = cvm.outputs.cvmPrincipalId
-output cvmPublicIp string = cvm.outputs.publicIpAddress
+output cvmPrivateIp string = cvm.outputs.privateIpAddress
 output foundryHubName string = foundry.outputs.hubName
 output foundryProjectName string = foundry.outputs.projectName
+

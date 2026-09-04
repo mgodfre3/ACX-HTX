@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "1457097099478096416"
+      "templateHash": "9698786649051880798"
     }
   },
   "parameters": {
@@ -44,10 +44,25 @@
         "description": "Admin password for the Confidential VM. Must satisfy Windows password complexity."
       }
     },
-    "allowedSourceIpPrefix": {
+    "existingVnetResourceGroup": {
       "type": "string",
+      "defaultValue": "AdaptiveCloud-Management",
       "metadata": {
-        "description": "Source IP prefix allowed to RDP / hit the CVM demo endpoint. Use your workstation public IP or a small CIDR."
+        "description": "Resource group of the existing VNet."
+      }
+    },
+    "existingVnetName": {
+      "type": "string",
+      "defaultValue": "AC-Managment-WUS2",
+      "metadata": {
+        "description": "Existing VNet name to attach workloads and private endpoints to."
+      }
+    },
+    "workloadSubnetName": {
+      "type": "string",
+      "defaultValue": "Default",
+      "metadata": {
+        "description": "Subnet name inside the existing VNet for the CVM NIC and private endpoints."
       }
     },
     "tags": {
@@ -60,6 +75,9 @@
         "description": "Tags applied to the resource group and every resource."
       }
     }
+  },
+  "variables": {
+    "workloadSubnetId": "[resourceId(parameters('existingVnetResourceGroup'), 'Microsoft.Network/virtualNetworks/subnets', parameters('existingVnetName'), parameters('workloadSubnetName'))]"
   },
   "resources": [
     {
@@ -88,6 +106,9 @@
           },
           "tags": {
             "value": "[parameters('tags')]"
+          },
+          "workloadSubnetId": {
+            "value": "[variables('workloadSubnetId')]"
           }
         },
         "template": {
@@ -97,7 +118,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "14487715717422924663"
+              "templateHash": "7756456836190739750"
             }
           },
           "parameters": {
@@ -125,10 +146,17 @@
               "metadata": {
                 "description": "KEK name inside the vault."
               }
+            },
+            "workloadSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet resource ID for the private endpoint."
+              }
             }
           },
           "variables": {
-            "vaultName": "[toLower(format('{0}-kv-{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]"
+            "vaultName": "[toLower(format('{0}-kv-{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]",
+            "peName": "[format('{0}-pe', variables('vaultName'))]"
           },
           "resources": [
             {
@@ -147,9 +175,9 @@
                 "enableSoftDelete": true,
                 "softDeleteRetentionInDays": 7,
                 "enablePurgeProtection": true,
-                "publicNetworkAccess": "Enabled",
+                "publicNetworkAccess": "Disabled",
                 "networkAcls": {
-                  "defaultAction": "Allow",
+                  "defaultAction": "Deny",
                   "bypass": "AzureServices"
                 }
               }
@@ -172,6 +200,32 @@
                   "enabled": true,
                   "exportable": false
                 }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('peName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('workloadSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "kv-plsc",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]",
+                      "groupIds": [
+                        "vault"
+                      ]
+                    }
+                  }
+                ]
               },
               "dependsOn": [
                 "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]"
@@ -202,6 +256,10 @@
             "kekUriWithVersion": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('kekName')), '2024-04-01-preview').keyUriWithVersion]"
+            },
+            "privateEndpointId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateEndpoints', variables('peName'))]"
             }
           }
         }
@@ -346,6 +404,9 @@
           },
           "storageIdentityId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.storageIdentityId.value]"
+          },
+          "workloadSubnetId": {
+            "value": "[variables('workloadSubnetId')]"
           }
         },
         "template": {
@@ -355,7 +416,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "2190324236842491544"
+              "templateHash": "10411332669368365417"
             }
           },
           "parameters": {
@@ -394,11 +455,18 @@
               "metadata": {
                 "description": "User-assigned MI resource ID used for storage CMK."
               }
+            },
+            "workloadSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet resource ID for the private endpoint."
+              }
             }
           },
           "variables": {
             "storageName": "[toLower(format('{0}stg{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]",
-            "trimmedName": "[if(greater(length(variables('storageName')), 24), substring(variables('storageName'), 0, 24), variables('storageName'))]"
+            "trimmedName": "[if(greater(length(variables('storageName')), 24), substring(variables('storageName'), 0, 24), variables('storageName'))]",
+            "peName": "[format('{0}-blob-pe', variables('trimmedName'))]"
           },
           "resources": [
             {
@@ -421,8 +489,12 @@
                 "minimumTlsVersion": "TLS1_2",
                 "allowBlobPublicAccess": false,
                 "supportsHttpsTrafficOnly": true,
-                "publicNetworkAccess": "Enabled",
+                "publicNetworkAccess": "Disabled",
                 "accessTier": "Hot",
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "bypass": "AzureServices"
+                },
                 "encryption": {
                   "identity": {
                     "userAssignedIdentity": "[parameters('storageIdentityId')]"
@@ -469,6 +541,32 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('trimmedName'), 'default')]"
               ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('peName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('workloadSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "stg-blob-plsc",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('trimmedName'))]",
+                      "groupIds": [
+                        "blob"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('trimmedName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -483,6 +581,10 @@
             "coldContainerName": {
               "type": "string",
               "value": "sovereign-cold"
+            },
+            "privateEndpointId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateEndpoints', variables('peName'))]"
             }
           }
         }
@@ -519,8 +621,8 @@
           "adminPassword": {
             "value": "[parameters('cvmAdminPassword')]"
           },
-          "allowedSourceIpPrefix": {
-            "value": "[parameters('allowedSourceIpPrefix')]"
+          "workloadSubnetId": {
+            "value": "[variables('workloadSubnetId')]"
           }
         },
         "template": {
@@ -530,7 +632,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "16836538979350578093"
+              "templateHash": "11039019249708177242"
             }
           },
           "parameters": {
@@ -564,10 +666,10 @@
                 "description": "Local admin password."
               }
             },
-            "allowedSourceIpPrefix": {
+            "workloadSubnetId": {
               "type": "string",
               "metadata": {
-                "description": "Source IP CIDR allowed for RDP and demo HTTP."
+                "description": "Subnet resource ID (existing) for the CVM NIC."
               }
             },
             "vmSize": {
@@ -580,92 +682,9 @@
           },
           "variables": {
             "vmName": "[format('{0}-cvm', parameters('namePrefix'))]",
-            "nicName": "[format('{0}-nic', variables('vmName'))]",
-            "pipName": "[format('{0}-pip', variables('vmName'))]",
-            "nsgName": "[format('{0}-nsg', variables('vmName'))]",
-            "vnetName": "[format('{0}-vnet', parameters('namePrefix'))]",
-            "subnetName": "cvm-subnet"
+            "nicName": "[format('{0}-nic', variables('vmName'))]"
           },
           "resources": [
-            {
-              "type": "Microsoft.Network/networkSecurityGroups",
-              "apiVersion": "2023-11-01",
-              "name": "[variables('nsgName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "properties": {
-                "securityRules": [
-                  {
-                    "name": "Allow-RDP",
-                    "properties": {
-                      "priority": 1000,
-                      "access": "Allow",
-                      "direction": "Inbound",
-                      "protocol": "Tcp",
-                      "sourceAddressPrefix": "[parameters('allowedSourceIpPrefix')]",
-                      "sourcePortRange": "*",
-                      "destinationAddressPrefix": "*",
-                      "destinationPortRange": "3389"
-                    }
-                  },
-                  {
-                    "name": "Allow-Demo-HTTP",
-                    "properties": {
-                      "priority": 1010,
-                      "access": "Allow",
-                      "direction": "Inbound",
-                      "protocol": "Tcp",
-                      "sourceAddressPrefix": "[parameters('allowedSourceIpPrefix')]",
-                      "sourcePortRange": "*",
-                      "destinationAddressPrefix": "*",
-                      "destinationPortRange": "8080"
-                    }
-                  }
-                ]
-              }
-            },
-            {
-              "type": "Microsoft.Network/virtualNetworks",
-              "apiVersion": "2023-11-01",
-              "name": "[variables('vnetName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "properties": {
-                "addressSpace": {
-                  "addressPrefixes": [
-                    "10.42.0.0/16"
-                  ]
-                },
-                "subnets": [
-                  {
-                    "name": "[variables('subnetName')]",
-                    "properties": {
-                      "addressPrefix": "10.42.1.0/24",
-                      "networkSecurityGroup": {
-                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-                      }
-                    }
-                  }
-                ]
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Network/publicIPAddresses",
-              "apiVersion": "2023-11-01",
-              "name": "[variables('pipName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "sku": {
-                "name": "Standard"
-              },
-              "properties": {
-                "publicIPAllocationMethod": "Static",
-                "publicIPAddressVersion": "IPv4"
-              }
-            },
             {
               "type": "Microsoft.Network/networkInterfaces",
               "apiVersion": "2023-11-01",
@@ -678,20 +697,13 @@
                     "name": "ipconfig1",
                     "properties": {
                       "subnet": {
-                        "id": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnetName'))]"
+                        "id": "[parameters('workloadSubnetId')]"
                       },
-                      "privateIPAllocationMethod": "Dynamic",
-                      "publicIPAddress": {
-                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
-                      }
+                      "privateIPAllocationMethod": "Dynamic"
                     }
                   }
                 ]
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]",
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
-              ]
+              }
             },
             {
               "type": "Microsoft.Compute/virtualMachines",
@@ -766,9 +778,9 @@
               "type": "string",
               "value": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2024-03-01', 'full').identity.principalId]"
             },
-            "publicIpAddress": {
+            "privateIpAddress": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2023-11-01').ipAddress]"
+              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', variables('nicName')), '2023-11-01').ipConfigurations[0].properties.privateIPAddress]"
             }
           }
         }
@@ -984,9 +996,9 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmPrincipalId.value]"
     },
-    "cvmPublicIp": {
+    "cvmPrivateIp": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.publicIpAddress.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.privateIpAddress.value]"
     },
     "foundryHubName": {
       "type": "string",

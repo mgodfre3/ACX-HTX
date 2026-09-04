@@ -4,20 +4,23 @@ The Azure public-cloud side of the "Master the Environment, Extend the Scale" so
 
 ## What this deploys
 
-Everything into a single resource group **`ACX-HTX`** in **West US 2**, tagged `Project=HTX` and `Created By=Michael Godfrey`.
+Everything into a single resource group **`ACX-HTX`** in **West US 2**, tagged `Project=HTX` and `Created By=Michael Godfrey`. **No public IPs.** All workloads attach to the existing VNet **`AC-Managment-WUS2`** (RG `AdaptiveCloud-Management`), subnet `Default`. Key Vault and Storage use **private endpoints** and have public network access **disabled**.
 
 | # | Resource | Purpose |
 |---|---|---|
-| 1 | Azure Key Vault Premium (HSM-backed) | Holds the KEK. Stand-in for the future Luna HSM. |
-| 2 | Storage Account with CMK | Encrypted "cold slice" blobs. CMK points at AKV KEK. |
-| 3 | Confidential VM (DCadsv5, Win 2022, SEV-SNP) | Attests, decrypts in TEE, runs small-LLM summary. |
+| 1 | Azure Key Vault Premium (HSM-backed, private endpoint) | Holds the KEK. Stand-in for the future Luna HSM. |
+| 2 | Storage Account with CMK (private endpoint) | Encrypted "cold slice" blobs. CMK points at AKV KEK. |
+| 3 | Confidential VM (DCadsv5, Win 2022, SEV-SNP) — private IP only | Attests, decrypts in TEE, runs small-LLM summary. Access via existing Azure Bastion. |
 | 4 | Azure AI Foundry hub + project | Represents commercial-GPU less-sensitive processing. |
 
 ## Prereqs
 
 - Azure CLI 2.60+ with Bicep
 - Subscription with Owner or Contributor + User Access Administrator
-- DCadsv5 quota in West US 2 (check with `az vm list-usage -l westus2 -o table | Select-String DCads`)
+- **Network Contributor** (or Subnet Join) on `AC-Managment-WUS2/Default` in RG `AdaptiveCloud-Management`
+- DCadsv5 quota in West US 2 (confirmed 0/100 vCPUs used)
+- Access to Azure Bastion in the existing VNet (or peered connectivity) for CVM RDP
+- Private DNS zones for `privatelink.vaultcore.azure.net` and `privatelink.blob.core.windows.net` linked to the VNet — required for name resolution of the private endpoints. The AC-Management environment includes a DNS resolver, so this is likely already handled centrally; verify before deploy.
 
 ## Deploy
 
