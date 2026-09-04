@@ -1,0 +1,17 @@
+*.bicepparam.local
+*.parameters.local.json
+*.secret.*
+.env
+.env.*
+!.env.example
+*.log
+*.pfx
+*.key
+*.pem
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+node_modules/
+bin/
+obj/

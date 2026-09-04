@@ -1,0 +1,1000 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "3652365746350415105"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus2",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "ACX-HTX",
+      "metadata": {
+        "description": "Resource group name."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "acxhtx",
+      "minLength": 3,
+      "maxLength": 8,
+      "metadata": {
+        "description": "Short name prefix for resources (lowercase, 3-8 chars). Used to build globally unique names."
+      }
+    },
+    "cvmAdminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Admin username for the Confidential VM."
+      }
+    },
+    "cvmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Admin password for the Confidential VM. Must satisfy Windows password complexity."
+      }
+    },
+    "allowedSourceIpPrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "Source IP prefix allowed to RDP / hit the CVM demo endpoint. Use your workstation public IP or a small CIDR."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Project": "HTX",
+        "Created By": "Michael Godfrey"
+      },
+      "metadata": {
+        "description": "Tags applied to the resource group and every resource."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('resourceGroupName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "kv-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "14487715717422924663"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "kekName": {
+              "type": "string",
+              "defaultValue": "htx-kek",
+              "metadata": {
+                "description": "KEK name inside the vault."
+              }
+            }
+          },
+          "variables": {
+            "vaultName": "[toLower(format('{0}-kv-{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2024-04-01-preview",
+              "name": "[variables('vaultName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "family": "A",
+                  "name": "premium"
+                },
+                "tenantId": "[subscription().tenantId]",
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "softDeleteRetentionInDays": 7,
+                "enablePurgeProtection": true,
+                "publicNetworkAccess": "Enabled",
+                "networkAcls": {
+                  "defaultAction": "Allow",
+                  "bypass": "AzureServices"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/keys",
+              "apiVersion": "2024-04-01-preview",
+              "name": "[format('{0}/{1}', variables('vaultName'), parameters('kekName'))]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "kty": "RSA-HSM",
+                "keySize": 3072,
+                "keyOps": [
+                  "wrapKey",
+                  "unwrapKey",
+                  "encrypt",
+                  "decrypt"
+                ],
+                "attributes": {
+                  "enabled": true,
+                  "exportable": false
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "keyVaultName": {
+              "type": "string",
+              "value": "[variables('vaultName')]"
+            },
+            "keyVaultId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]"
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('vaultName')), '2024-04-01-preview').vaultUri]"
+            },
+            "kekName": {
+              "type": "string",
+              "value": "[parameters('kekName')]"
+            },
+            "kekUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('kekName')), '2024-04-01-preview').keyUri]"
+            },
+            "kekUriWithVersion": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('kekName')), '2024-04-01-preview').keyUriWithVersion]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "identity-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "keyVaultName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultName.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "9481015654753082521"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing Key Vault name (RBAC-enabled)."
+              }
+            }
+          },
+          "variables": {
+            "storageIdentityName": "[format('{0}-mi-storage', parameters('namePrefix'))]",
+            "roleKvCryptoServiceEncryptionUser": "[format('/subscriptions/{0}/providers/Microsoft.Authorization/roleDefinitions/e147488a-f6f5-4113-8e2d-b22465e65bf6', subscription().subscriptionId)]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[variables('storageIdentityName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), 'kv-encryption-user')]",
+              "properties": {
+                "roleDefinitionId": "[variables('roleKvCryptoServiceEncryptionUser')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "storageIdentityId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName'))]"
+            },
+            "storageIdentityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').principalId]"
+            },
+            "storageIdentityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').clientId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "storage-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "keyVaultUri": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultUri.value]"
+          },
+          "kekName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekName.value]"
+          },
+          "storageIdentityId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.storageIdentityId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "2190324236842491544"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault base URI."
+              }
+            },
+            "kekName": {
+              "type": "string",
+              "metadata": {
+                "description": "KEK name inside the vault."
+              }
+            },
+            "storageIdentityId": {
+              "type": "string",
+              "metadata": {
+                "description": "User-assigned MI resource ID used for storage CMK."
+              }
+            }
+          },
+          "variables": {
+            "storageName": "[toLower(format('{0}stg{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]",
+            "trimmedName": "[if(greater(length(variables('storageName')), 24), substring(variables('storageName'), 0, 24), variables('storageName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('trimmedName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('storageIdentityId'))]": {}
+                }
+              },
+              "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "supportsHttpsTrafficOnly": true,
+                "publicNetworkAccess": "Enabled",
+                "accessTier": "Hot",
+                "encryption": {
+                  "identity": {
+                    "userAssignedIdentity": "[parameters('storageIdentityId')]"
+                  },
+                  "keySource": "Microsoft.Keyvault",
+                  "keyvaultproperties": {
+                    "keyvaulturi": "[parameters('keyVaultUri')]",
+                    "keyname": "[parameters('kekName')]"
+                  },
+                  "services": {
+                    "blob": {
+                      "enabled": true,
+                      "keyType": "Account"
+                    },
+                    "file": {
+                      "enabled": true,
+                      "keyType": "Account"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', variables('trimmedName'), 'default')]",
+              "properties": {
+                "deleteRetentionPolicy": {
+                  "enabled": true,
+                  "days": 7
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('trimmedName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', variables('trimmedName'), 'default', 'sovereign-cold')]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('trimmedName'), 'default')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "storageAccountName": {
+              "type": "string",
+              "value": "[variables('trimmedName')]"
+            },
+            "storageAccountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('trimmedName'))]"
+            },
+            "coldContainerName": {
+              "type": "string",
+              "value": "sovereign-cold"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "cvm-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('cvmAdminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('cvmAdminPassword')]"
+          },
+          "allowedSourceIpPrefix": {
+            "value": "[parameters('allowedSourceIpPrefix')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "16836538979350578093"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Local admin username."
+              }
+            },
+            "adminPassword": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Local admin password."
+              }
+            },
+            "allowedSourceIpPrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Source IP CIDR allowed for RDP and demo HTTP."
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_DC2ads_v5",
+              "metadata": {
+                "description": "Confidential VM size (AMD SEV-SNP)."
+              }
+            }
+          },
+          "variables": {
+            "vmName": "[format('{0}-cvm', parameters('namePrefix'))]",
+            "nicName": "[format('{0}-nic', variables('vmName'))]",
+            "pipName": "[format('{0}-pip', variables('vmName'))]",
+            "nsgName": "[format('{0}-nsg', variables('vmName'))]",
+            "vnetName": "[format('{0}-vnet', parameters('namePrefix'))]",
+            "subnetName": "cvm-subnet"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('nsgName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "Allow-RDP",
+                    "properties": {
+                      "priority": 1000,
+                      "access": "Allow",
+                      "direction": "Inbound",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "[parameters('allowedSourceIpPrefix')]",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "3389"
+                    }
+                  },
+                  {
+                    "name": "Allow-Demo-HTTP",
+                    "properties": {
+                      "priority": 1010,
+                      "access": "Allow",
+                      "direction": "Inbound",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "[parameters('allowedSourceIpPrefix')]",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "8080"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('vnetName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.42.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "[variables('subnetName')]",
+                    "properties": {
+                      "addressPrefix": "10.42.1.0/24",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('pipName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static",
+                "publicIPAddressVersion": "IPv4"
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('nicName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), variables('subnetName'))]"
+                      },
+                      "privateIPAllocationMethod": "Dynamic",
+                      "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "computerName": "htxcvm",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "adminPassword": "[parameters('adminPassword')]",
+                  "windowsConfiguration": {
+                    "provisionVMAgent": true,
+                    "enableAutomaticUpdates": true
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "MicrosoftWindowsServer",
+                    "offer": "windows-cvm",
+                    "sku": "2022-datacenter-cvm",
+                    "version": "latest"
+                  },
+                  "osDisk": {
+                    "createOption": "FromImage",
+                    "managedDisk": {
+                      "storageAccountType": "Premium_LRS",
+                      "securityProfile": {
+                        "securityEncryptionType": "DiskWithVMGuestState"
+                      }
+                    }
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+                    }
+                  ]
+                },
+                "securityProfile": {
+                  "securityType": "ConfidentialVM",
+                  "uefiSettings": {
+                    "secureBootEnabled": true,
+                    "vTpmEnabled": true
+                  }
+                },
+                "diagnosticsProfile": {
+                  "bootDiagnostics": {
+                    "enabled": true
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "cvmName": {
+              "type": "string",
+              "value": "[variables('vmName')]"
+            },
+            "cvmPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2024-03-01', 'full').identity.principalId]"
+            },
+            "publicIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2023-11-01').ipAddress]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "foundry-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "7839179346614311041"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            }
+          },
+          "variables": {
+            "suffix": "[uniqueString(resourceGroup().id)]",
+            "hubStorageName": "[toLower(format('{0}fdystg{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 8)))]",
+            "hubKvName": "[toLower(format('{0}-fdy-kv-{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 6)))]",
+            "hubAiName": "[toLower(format('{0}-fdy-ai-{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 6)))]",
+            "hubName": "[format('{0}-foundry-hub', parameters('namePrefix'))]",
+            "projectName": "[format('{0}-foundry-proj', parameters('namePrefix'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('hubStorageName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "supportsHttpsTrafficOnly": true
+              }
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2024-04-01-preview",
+              "name": "[variables('hubKvName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "tenantId": "[subscription().tenantId]",
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "softDeleteRetentionInDays": 7
+              }
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[variables('hubAiName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "Request_Source": "rest"
+              }
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-07-01-preview",
+              "name": "[variables('hubName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "Hub",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "properties": {
+                "friendlyName": "HTX Foundry Hub",
+                "description": "AI Foundry hub representing commercial-GPU less-sensitive processing.",
+                "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('hubStorageName'))]",
+                "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('hubKvName'))]",
+                "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('hubAiName'))]",
+                "publicNetworkAccess": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/components', variables('hubAiName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults', variables('hubKvName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('hubStorageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.MachineLearningServices/workspaces",
+              "apiVersion": "2024-07-01-preview",
+              "name": "[variables('projectName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "Project",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+              },
+              "properties": {
+                "friendlyName": "HTX Foundry Project",
+                "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]",
+                "publicNetworkAccess": "Enabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "hubName": {
+              "type": "string",
+              "value": "[variables('hubName')]"
+            },
+            "projectName": {
+              "type": "string",
+              "value": "[variables('projectName')]"
+            },
+            "hubId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "resourceGroupName": {
+      "type": "string",
+      "value": "[parameters('resourceGroupName')]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultName.value]"
+    },
+    "kekName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekName.value]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.storageAccountName.value]"
+    },
+    "coldContainerName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.coldContainerName.value]"
+    },
+    "cvmName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmName.value]"
+    },
+    "cvmPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.cvmPrincipalId.value]"
+    },
+    "cvmPublicIp": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cvm-deploy'), '2025-04-01').outputs.publicIpAddress.value]"
+    },
+    "foundryHubName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.hubName.value]"
+    },
+    "foundryProjectName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.projectName.value]"
+    }
+  }
+}
