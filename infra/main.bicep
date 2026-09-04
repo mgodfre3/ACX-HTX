@@ -33,7 +33,7 @@ param tags object = {
   'Created By': 'Michael Godfrey'
 }
 
-var workloadSubnetId = resourceId(existingVnetResourceGroup, 'Microsoft.Network/virtualNetworks/subnets', existingVnetName, workloadSubnetName)
+var workloadSubnetId = '/subscriptions/${subscription().subscriptionId}/resourceGroups/${existingVnetResourceGroup}/providers/Microsoft.Network/virtualNetworks/${existingVnetName}/subnets/${workloadSubnetName}'
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName

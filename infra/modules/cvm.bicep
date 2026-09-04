@@ -65,8 +65,8 @@ resource cvm 'Microsoft.Compute/virtualMachines@2024-03-01' = {
     storageProfile: {
       imageReference: {
         publisher: 'MicrosoftWindowsServer'
-        offer: 'windows-cvm'
-        sku: '2022-datacenter-cvm'
+        offer: 'WindowsServer'
+        sku: '2022-datacenter-g2'
         version: 'latest'
       }
       osDisk: {
