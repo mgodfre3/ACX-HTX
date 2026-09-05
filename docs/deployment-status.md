@@ -27,14 +27,18 @@ All resources + the RG carry:
 ### Confidential VM
 Set `deployCvm = true` in `main.bicep` to enable.
 
-**Blocker:** SEV-SNP CVM SKUs (`DCasv5`, `DCadsv5`, `DCasv6`, `DCadsv6`, `ECasv5`, `ECasv6`) are **not offered** on the compute hardware this subscription is assigned to in West US 2. ARM's error explicitly listed only L-family and E-family sizes as available. `DCasv6` quota is 0/0 (needs quota request), and `DCasv5` shows quota available but the deployment fails with "not available in current region."
+**Blocker:** SEV-SNP CVM SKUs (`DCasv5`, `DCadsv5`, `DCasv6`, `DCadsv6`, `ECasv5`, `ECasv6`) are **not offered on any hardware cluster this subscription is currently assigned to**. Direct real-create probes in eastus, eastus2, westus2, westus3, centralus, southcentralus, swedencentral, and uksouth all returned `"not available in the current region"`. `DCasv6` quota is 0/0 fleet-wide.
 
-**Unblock options:**
-1. **Submit a quota + capacity request** for `standardDCasv6Family` in West US 2 via [Azure portal](https://portal.azure.com/#blade/Microsoft_Azure_Capacity/UsageAndQuota.ReactView).
-2. **Deploy the CVM in a different region** (e.g., `eastus2` where DCasv5 is broadly offered) and peer the VNet back to `AC-Managment-WUS2`.
-3. **Wait for capacity** — SEV-SNP capacity in West US 2 fluctuates.
+`az vm list-skus` and `az vm create --validate` do NOT catch this — both incorrectly reported the SKU as deployable. Only a real `az vm create` (with allocation) exposes the capacity gap.
 
-Recommendation: option 2 is fastest if urgency demands. The Bicep is region-agnostic and the private endpoints work across peered VNets.
+**Additional constraint:** The demo VNet must be **peered to `AC-HubGW-EUS` and routed through the ExpressRoute gateway** (`AC-VNGW-EUS` in East US). `AC-Managment-WUS2` is already on this spine via Azure Virtual Network Manager peering with `useRemoteGateways=true`. Any CVM VNet must join the same routed topology.
+
+**Unblock options (ranked):**
+1. **File an Azure capacity request** for `standardDCASv5Family` (or `standardDCasv6Family`) in a region that hosts the AC hub or is peered to it — East US or West US 2 preferred. This is the correct long-term fix. Path: [Azure portal → Support → New Request → Service and subscription limits (quotas) → Compute](https://portal.azure.com/#blade/Microsoft_Azure_Support/HelpAndSupportBlade/newsupportrequest).
+2. **Deploy CVM in a region with confirmed capacity (North Europe / West Europe)** and create a new VNet peering to `AC-HubGW-EUS`. Cross-continent peering works but adds ~100 ms latency to on-prem calls.
+3. **Wait for capacity** — SEV-SNP hardware allocation shifts weekly.
+
+The Bicep already supports both approaches — `main.bicepparam` toggles region and CVM flag independently.
 
 ### AI Foundry hub + project
 Set `deployFoundry = true` in `main.bicep` to enable.
@@ -47,6 +51,16 @@ Set `deployFoundry = true` in `main.bicep` to enable.
 3. Deploy Foundry using the newer AI Studio / Cognitive Services account pattern that doesn't require access-policy writes.
 
 Recommendation: option 3 — modernize to the AI Studio account pattern in a follow-on iteration.
+
+## Network Topology
+
+- **VNet:** `AC-Managment-WUS2` (RG `AdaptiveCloud-Management`, region West US 2)
+- **Subnet:** `Default` (10.255.250.0/28) — holds the KV + Storage private endpoints
+- **Peered to:** `AC-HubGW-EUS` (hub in East US) via Azure Virtual Network Manager, `useRemoteGateways=true`
+- **ExpressRoute path:** hub uses `AC-VNGW-EUS` gateway → ExpressRoute → on-prem
+- **On-prem reachability:** routed via the hub's ER — Azure Local ALDO stamp will consume this same routing plane once ready
+
+All private endpoints resolve on the peered spine; no public internet path exists for KV or Storage data plane.
 
 ## Accessing the vault
 
