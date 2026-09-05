@@ -27,8 +27,11 @@ param existingVnetName string = 'AC-Managment-WUS2'
 @description('Subnet name inside the existing VNet for the CVM NIC and private endpoints.')
 param workloadSubnetName string = 'Default'
 
-@description('Deploy the Confidential VM. Requires SEV-SNP CVM SKU availability in region (DCasv5/v6). Currently blocked in westus2 for this subscription — SKU family not offered on the assigned hardware cluster.')
+@description('Deploy the Confidential VM (SEV-SNP). Blocked in this subscription pending SEV-SNP capacity.')
 param deployCvm bool = false
+
+@description('Deploy a standard VM whose managed disks are encrypted with the customer KEK via a Disk Encryption Set. Same key-custody story as CVM without the SEV-SNP capacity dependency.')
+param deployCmkVm bool = true
 
 @description('Deploy the AI Foundry hub + project. Blocked pending resolution of ML workspace RP access-policy write permission on the shared Key Vault.')
 param deployFoundry bool = false
@@ -96,6 +99,22 @@ module cvm 'modules/cvm.bicep' = if (deployCvm) {
   }
 }
 
+module vmCmk 'modules/vm-cmk.bicep' = if (deployCmkVm) {
+  scope: rg
+  name: 'vm-cmk-deploy'
+  params: {
+    location: location
+    namePrefix: namePrefix
+    tags: tags
+    adminUsername: cvmAdminUsername
+    adminPassword: cvmAdminPassword
+    workloadSubnetId: workloadSubnetId
+    keyVaultName: keyvault.outputs.keyVaultName
+    kekName: keyvault.outputs.kekName
+    kekUriWithVersion: keyvault.outputs.kekUriWithVersion
+  }
+}
+
 module foundry 'modules/foundry.bicep' = if (deployFoundry) {
   scope: rg
   name: 'foundry-deploy'
@@ -114,6 +133,9 @@ output coldContainerName string = storage.outputs.coldContainerName
 output cvmName string = deployCvm ? cvm.outputs.cvmName : ''
 output cvmPrincipalId string = deployCvm ? cvm.outputs.cvmPrincipalId : ''
 output cvmPrivateIp string = deployCvm ? cvm.outputs.privateIpAddress : ''
-output foundryHubName string = deployFoundry ? foundry.outputs.hubName : ''
-output foundryProjectName string = deployFoundry ? foundry.outputs.projectName : ''
+output foundryHubName string = deployFoundry ? foundry!.outputs.hubName : ''
+output foundryProjectName string = deployFoundry ? foundry!.outputs.projectName : ''
+output cmkVmName string = deployCmkVm ? vmCmk!.outputs.vmName : ''
+output cmkVmPrivateIp string = deployCmkVm ? vmCmk!.outputs.privateIpAddress : ''
+output diskEncryptionSetName string = deployCmkVm ? vmCmk!.outputs.diskEncryptionSetName : ''
 

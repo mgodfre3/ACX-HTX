@@ -62,11 +62,14 @@ Traditional "sovereign cloud" stories rely on where the data sits. Ours relies o
 **Deployed and ready (Azure side, live in RG `ACX-HTX` today):**
 - Azure Key Vault Premium with HSM-backed customer KEK
 - Storage account with customer-managed key encryption
+- **Windows Server 2022 VM with Trusted Launch (Secure Boot + vTPM) and OS disk encrypted by the customer KEK via a Disk Encryption Set** — same key-custody story as a Confidential VM; SEV-SNP memory encryption swaps in later
 - Private endpoints (no public IPs anywhere in the sovereign path)
 - Managed identity + least-privilege RBAC wiring
 
+**Design note:** The "Strong" tier (CMK + Trusted Launch) is the closest solution available on this subscription's hardware today. The "Strongest" tier (Confidential VM with SEV-SNP memory encryption + guest attestation) requires capacity that Azure has not offered on any hardware cluster this subscription is currently assigned to. The demo narrative is unchanged; the upgrade path is a config flag.
+
 **In flight (Azure side, awaiting quota / permission unblock):**
-- AMD SEV-SNP Confidential VM — blocked on SEV-SNP SKU availability in West US 2 for this subscription; unblock path documented in `docs/deployment-status.md`
+- AMD SEV-SNP Confidential VM — blocked on SKU capacity across every US region tested; slot ready in Bicep behind `deployCvm` flag
 - Azure AI Foundry hub + project — blocked on ML workspace RP KV access-policy write; modernization to AI Studio pattern planned
 
 **Ready to bolt on (Azure Local side, in flight):**

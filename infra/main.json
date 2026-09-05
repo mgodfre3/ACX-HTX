@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "7146167862324825413"
+      "templateHash": "9154859424061141247"
     }
   },
   "parameters": {
@@ -69,7 +69,14 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Deploy the Confidential VM. Requires SEV-SNP CVM SKU availability in region (DCasv5/v6). Currently blocked in westus2 for this subscription — SKU family not offered on the assigned hardware cluster."
+        "description": "Deploy the Confidential VM (SEV-SNP). Blocked in this subscription pending SEV-SNP capacity."
+      }
+    },
+    "deployCmkVm": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy a standard VM whose managed disks are encrypted with the customer KEK via a Disk Encryption Set. Same key-custody story as CVM without the SEV-SNP capacity dependency."
       }
     },
     "deployFoundry": {
@@ -805,6 +812,272 @@
       ]
     },
     {
+      "condition": "[parameters('deployCmkVm')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "vm-cmk-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('cvmAdminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('cvmAdminPassword')]"
+          },
+          "workloadSubnetId": {
+            "value": "[variables('workloadSubnetId')]"
+          },
+          "keyVaultName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultName.value]"
+          },
+          "kekName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekName.value]"
+          },
+          "kekUriWithVersion": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekUriWithVersion.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "12639562809686422094"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Local admin username."
+              }
+            },
+            "adminPassword": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Local admin password."
+              }
+            },
+            "workloadSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet resource ID (existing) for the VM NIC."
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault name that holds the KEK."
+              }
+            },
+            "kekName": {
+              "type": "string",
+              "metadata": {
+                "description": "KEK name in the vault."
+              }
+            },
+            "kekUriWithVersion": {
+              "type": "string",
+              "metadata": {
+                "description": "KEK key identifier with version."
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_D2as_v5",
+              "metadata": {
+                "description": "VM size. Uses widely available AMD non-confidential; CMK works on any modern SKU."
+              }
+            }
+          },
+          "variables": {
+            "vmName": "[format('{0}-vm', parameters('namePrefix'))]",
+            "nicName": "[format('{0}-nic', variables('vmName'))]",
+            "desName": "[format('{0}-des', parameters('namePrefix'))]",
+            "roleKvCryptoServiceEncryptionUser": "[format('/subscriptions/{0}/providers/Microsoft.Authorization/roleDefinitions/e147488a-f6f5-4113-8e2d-b22465e65bf6', subscription().subscriptionId)]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Compute/diskEncryptionSets",
+              "apiVersion": "2024-03-02",
+              "name": "[variables('desName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "encryptionType": "EncryptionAtRestWithCustomerKey",
+                "rotationToLatestKeyVersionEnabled": true,
+                "activeKey": {
+                  "keyUrl": "[parameters('kekUriWithVersion')]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName')), 'des-kv-encryption-user')]",
+              "properties": {
+                "roleDefinitionId": "[variables('roleKvCryptoServiceEncryptionUser')]",
+                "principalId": "[reference(resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName')), '2024-03-02', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2023-11-01",
+              "name": "[variables('nicName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[parameters('workloadSubnetId')]"
+                      },
+                      "privateIPAllocationMethod": "Dynamic"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2024-03-01",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "computerName": "htxvm",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "adminPassword": "[parameters('adminPassword')]",
+                  "windowsConfiguration": {
+                    "provisionVMAgent": true,
+                    "enableAutomaticUpdates": true
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "MicrosoftWindowsServer",
+                    "offer": "WindowsServer",
+                    "sku": "2022-datacenter-g2",
+                    "version": "latest"
+                  },
+                  "osDisk": {
+                    "createOption": "FromImage",
+                    "managedDisk": {
+                      "storageAccountType": "Premium_LRS",
+                      "diskEncryptionSet": {
+                        "id": "[resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName'))]"
+                      }
+                    }
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+                    }
+                  ]
+                },
+                "securityProfile": {
+                  "securityType": "TrustedLaunch",
+                  "uefiSettings": {
+                    "secureBootEnabled": true,
+                    "vTpmEnabled": true
+                  }
+                },
+                "diagnosticsProfile": {
+                  "bootDiagnostics": {
+                    "enabled": true
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName'))]",
+                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName')), 'des-kv-encryption-user'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "value": "[variables('vmName')]"
+            },
+            "vmPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2024-03-01', 'full').identity.principalId]"
+            },
+            "privateIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', variables('nicName')), '2023-11-01').ipConfigurations[0].properties.privateIPAddress]"
+            },
+            "diskEncryptionSetName": {
+              "type": "string",
+              "value": "[variables('desName')]"
+            },
+            "diskEncryptionSetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Compute/diskEncryptionSets', variables('desName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
       "condition": "[parameters('deployFoundry')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
@@ -1024,6 +1297,18 @@
     "foundryProjectName": {
       "type": "string",
       "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.projectName.value, '')]"
+    },
+    "cmkVmName": {
+      "type": "string",
+      "value": "[if(parameters('deployCmkVm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vm-cmk-deploy'), '2025-04-01').outputs.vmName.value, '')]"
+    },
+    "cmkVmPrivateIp": {
+      "type": "string",
+      "value": "[if(parameters('deployCmkVm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vm-cmk-deploy'), '2025-04-01').outputs.privateIpAddress.value, '')]"
+    },
+    "diskEncryptionSetName": {
+      "type": "string",
+      "value": "[if(parameters('deployCmkVm'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vm-cmk-deploy'), '2025-04-01').outputs.diskEncryptionSetName.value, '')]"
     }
   }
 }
