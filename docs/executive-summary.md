@@ -60,17 +60,21 @@ Traditional "sovereign cloud" stories rely on where the data sits. Ours relies o
 ## What's In The Live Demo Today
 
 **Deployed and ready (Azure side, live in RG `ACX-HTX` today):**
-- Azure Key Vault Premium with HSM-backed customer KEK
+- Azure Key Vault Premium with HSM-backed customer KEK `htx-kek`
 - Storage account with customer-managed key encryption
-- **Windows Server 2022 VM with Trusted Launch (Secure Boot + vTPM) and OS disk encrypted by the customer KEK via a Disk Encryption Set** — same key-custody story as a Confidential VM; SEV-SNP memory encryption swaps in later
+- Windows Server 2022 VM with Trusted Launch and OS disk encrypted by the customer KEK via a Disk Encryption Set — same key-custody story as a Confidential VM; SEV-SNP memory encryption swaps in later
+- **Azure AI Foundry hub + project + CMK-encrypted Azure Container Registry** — the model training + distribution registry, protected by the same customer KEK
 - Private endpoints (no public IPs anywhere in the sovereign path)
 - Managed identity + least-privilege RBAC wiring
 
+**One key, three surfaces, one boundary.** `htx-kek` backs the Storage CMK, the VM disk CMK, and the ACR CMK simultaneously. Revoke it once — everything encrypted at rest becomes unreadable. That's the demo.
+
+**Model lifecycle (new):** YOLOv8 cell-antenna detector training script + Azure ML job spec (`training/`), and Arc-AKS deployment manifests + ACR Connected Registry Bicep for distribution to ALDO stamps (`arc-aks/`). Reference architecture until the Tokyo WKLD stamp is ready.
+
 **Design note:** The "Strong" tier (CMK + Trusted Launch) is the closest solution available on this subscription's hardware today. The "Strongest" tier (Confidential VM with SEV-SNP memory encryption + guest attestation) requires capacity that Azure has not offered on any hardware cluster this subscription is currently assigned to. The demo narrative is unchanged; the upgrade path is a config flag.
 
-**In flight (Azure side, awaiting quota / permission unblock):**
+**In flight (Azure side, awaiting capacity):**
 - AMD SEV-SNP Confidential VM — blocked on SKU capacity across every US region tested; slot ready in Bicep behind `deployCvm` flag
-- Azure AI Foundry hub + project — blocked on ML workspace RP KV access-policy write; modernization to AI Studio pattern planned
 
 **Ready to bolt on (Azure Local side, in flight):**
 - Azure Local Disconnected Operations stamp with A100 GPUs

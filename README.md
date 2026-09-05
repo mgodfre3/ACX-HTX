@@ -1,9 +1,11 @@
-# Sovereign Hybrid Demo — Azure Buildout (Phase 1)
+# Sovereign Hybrid Demo — Azure Buildout
 
-The Azure public-cloud side of the "Master the Environment, Extend the Scale" sovereign hybrid architecture. Azure Local Disconnected Operations (ALDO) side will bolt on when the Tokyo WKLD stamp is ready.
+The Azure public-cloud side of the "Master the Environment, Extend the Scale" sovereign hybrid architecture, plus the model-training + distribution pipeline that feeds Arc-AKS clusters on Azure Local Disconnected Operations (ALDO) stamps.
 
 **Live deployment status:** see [`docs/deployment-status.md`](docs/deployment-status.md).  
-**Executive summary + diagrams:** see [`docs/executive-summary.md`](docs/executive-summary.md).
+**Executive summary + diagrams:** see [`docs/executive-summary.md`](docs/executive-summary.md).  
+**Model training pipeline:** see [`training/README.md`](training/README.md).  
+**Arc-AKS distribution:** see [`arc-aks/README.md`](arc-aks/README.md).
 
 ## What this deploys
 

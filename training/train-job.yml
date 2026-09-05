@@ -1,0 +1,39 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+
+display_name: htx-antenna-yolo-train
+experiment_name: htx-antenna-detector
+description: |
+  Fine-tune YOLOv8 to detect cellular antennas from drone imagery.
+  Runs on a single-GPU Foundry compute. Publishes the trained ONNX
+  as an OCI artifact to the sovereign CMK-encrypted ACR.
+
+compute: azureml:htx-gpu-cluster
+
+inputs:
+  dataset_yaml:
+    type: uri_file
+    path: azureml://datastores/htx_antenna_data/paths/dataset.yaml
+    mode: ro_mount
+  model_version:
+    type: string
+    default: v1
+
+environment:
+  image: mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04
+  conda_file: environment.yml
+
+command: >
+  pip install ultralytics onnx onnxruntime-gpu &&
+  curl -sSLo /tmp/oras.tar.gz https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz &&
+  tar -xzf /tmp/oras.tar.gz -C /usr/local/bin oras &&
+  python train_antenna_yolo.py
+  --dataset-yaml ${{inputs.dataset_yaml}}
+  --acr-login-server $HTX_ACR_LOGIN_SERVER
+  --tag ${{inputs.model_version}}
+
+environment_variables:
+  HTX_ACR_LOGIN_SERVER: <populated-by-submit-script>
+
+identity:
+  type: user_identity

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "9154859424061141247"
+      "templateHash": "14599363029329986523"
     }
   },
   "parameters": {
@@ -81,9 +81,16 @@
     },
     "deployFoundry": {
       "type": "bool",
-      "defaultValue": false,
+      "defaultValue": true,
       "metadata": {
-        "description": "Deploy the AI Foundry hub + project. Blocked pending resolution of ML workspace RP access-policy write permission on the shared Key Vault."
+        "description": "Deploy the AI Foundry hub + project + CMK-encrypted ACR (model registry)."
+      }
+    },
+    "mlRpObjectId": {
+      "type": "string",
+      "defaultValue": "9b755077-49fd-4250-a1e8-d8da8af58a07",
+      "metadata": {
+        "description": "Azure ML RP service principal object ID in this tenant. Required for Foundry KV access policy pre-grant."
       }
     },
     "tags": {
@@ -1097,6 +1104,15 @@
           },
           "tags": {
             "value": "[parameters('tags')]"
+          },
+          "kekUriWithVersion": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekUriWithVersion.value]"
+          },
+          "keyVaultName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultName.value]"
+          },
+          "mlRpObjectId": {
+            "value": "[parameters('mlRpObjectId')]"
           }
         },
         "template": {
@@ -1106,7 +1122,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "10082766640388270249"
+              "templateHash": "14781307543407504332"
             }
           },
           "parameters": {
@@ -1127,6 +1143,24 @@
               "metadata": {
                 "description": "Tags applied to every resource."
               }
+            },
+            "kekUriWithVersion": {
+              "type": "string",
+              "metadata": {
+                "description": "KEK URL with version for CMK."
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault name that holds the KEK (used to grant ACR MI encryption rights)."
+              }
+            },
+            "mlRpObjectId": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure ML RP service principal object ID for KV access-policy grant. Tenant-specific."
+              }
             }
           },
           "variables": {
@@ -1134,25 +1168,66 @@
             "hubStorageName": "[toLower(format('{0}fdystg{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 8)))]",
             "hubKvName": "[toLower(format('{0}-fdy-kv-{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 6)))]",
             "hubAiName": "[toLower(format('{0}-fdy-ai-{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 6)))]",
+            "acrName": "[toLower(format('{0}acr{1}', parameters('namePrefix'), substring(variables('suffix'), 0, 8)))]",
+            "acrMiName": "[format('{0}-acr-mi', parameters('namePrefix'))]",
             "hubName": "[format('{0}-foundry-hub', parameters('namePrefix'))]",
-            "projectName": "[format('{0}-foundry-proj', parameters('namePrefix'))]"
+            "projectName": "[format('{0}-foundry-proj', parameters('namePrefix'))]",
+            "roleKvCryptoServiceEncryptionUser": "[format('/subscriptions/{0}/providers/Microsoft.Authorization/roleDefinitions/e147488a-f6f5-4113-8e2d-b22465e65bf6', subscription().subscriptionId)]"
           },
           "resources": [
             {
-              "type": "Microsoft.Storage/storageAccounts",
-              "apiVersion": "2023-05-01",
-              "name": "[variables('hubStorageName')]",
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[variables('acrMiName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName')), 'acr-kv-encryption')]",
+              "properties": {
+                "roleDefinitionId": "[variables('roleKvCryptoServiceEncryptionUser')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-11-01-preview",
+              "name": "[variables('acrName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "sku": {
-                "name": "Standard_LRS"
+                "name": "Premium"
               },
-              "kind": "StorageV2",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName')))]": {}
+                }
+              },
               "properties": {
-                "minimumTlsVersion": "TLS1_2",
-                "allowBlobPublicAccess": false,
-                "supportsHttpsTrafficOnly": true
-              }
+                "adminUserEnabled": false,
+                "publicNetworkAccess": "Enabled",
+                "networkRuleBypassOptions": "AzureServices",
+                "encryption": {
+                  "status": "enabled",
+                  "keyVaultProperties": {
+                    "keyIdentifier": "[parameters('kekUriWithVersion')]",
+                    "identity": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName')), '2023-01-31').clientId]"
+                  }
+                },
+                "zoneRedundancy": "Disabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName'))]",
+                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('acrMiName')), 'acr-kv-encryption'))]"
+              ]
             },
             {
               "type": "Microsoft.KeyVault/vaults",
@@ -1167,9 +1242,48 @@
                 },
                 "tenantId": "[subscription().tenantId]",
                 "enableRbacAuthorization": false,
-                "accessPolicies": [],
                 "enableSoftDelete": true,
-                "softDeleteRetentionInDays": 7
+                "softDeleteRetentionInDays": 7,
+                "accessPolicies": [
+                  {
+                    "tenantId": "[subscription().tenantId]",
+                    "objectId": "[parameters('mlRpObjectId')]",
+                    "permissions": {
+                      "keys": [
+                        "get",
+                        "list",
+                        "wrapKey",
+                        "unwrapKey"
+                      ],
+                      "secrets": [
+                        "get",
+                        "list",
+                        "set",
+                        "delete"
+                      ],
+                      "certificates": [
+                        "get",
+                        "list"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('hubStorageName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "supportsHttpsTrafficOnly": true
               }
             },
             {
@@ -1200,13 +1314,15 @@
               },
               "properties": {
                 "friendlyName": "HTX Foundry Hub",
-                "description": "AI Foundry hub representing commercial-GPU less-sensitive processing.",
+                "description": "AI Foundry hub for cell-antenna model training. Model registry uses CMK-encrypted ACR.",
                 "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('hubStorageName'))]",
                 "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('hubKvName'))]",
                 "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('hubAiName'))]",
+                "containerRegistry": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
                 "publicNetworkAccess": "Enabled"
               },
               "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
                 "[resourceId('Microsoft.Insights/components', variables('hubAiName'))]",
                 "[resourceId('Microsoft.KeyVault/vaults', variables('hubKvName'))]",
                 "[resourceId('Microsoft.Storage/storageAccounts', variables('hubStorageName'))]"
@@ -1227,7 +1343,7 @@
                 "tier": "Basic"
               },
               "properties": {
-                "friendlyName": "HTX Foundry Project",
+                "friendlyName": "HTX Antenna Training Project",
                 "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]",
                 "publicNetworkAccess": "Enabled"
               },
@@ -1248,11 +1364,20 @@
             "hubId": {
               "type": "string",
               "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('hubName'))]"
+            },
+            "acrName": {
+              "type": "string",
+              "value": "[variables('acrName')]"
+            },
+            "acrLoginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-11-01-preview').loginServer]"
             }
           }
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
       ]
     }
@@ -1297,6 +1422,14 @@
     "foundryProjectName": {
       "type": "string",
       "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.projectName.value, '')]"
+    },
+    "foundryAcrName": {
+      "type": "string",
+      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.acrName.value, '')]"
+    },
+    "foundryAcrLoginServer": {
+      "type": "string",
+      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.acrLoginServer.value, '')]"
     },
     "cmkVmName": {
       "type": "string",

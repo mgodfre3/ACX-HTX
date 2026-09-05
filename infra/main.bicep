@@ -33,8 +33,8 @@ param deployCvm bool = false
 @description('Deploy a standard VM whose managed disks are encrypted with the customer KEK via a Disk Encryption Set. Same key-custody story as CVM without the SEV-SNP capacity dependency.')
 param deployCmkVm bool = true
 
-@description('Deploy the AI Foundry hub + project. Blocked pending resolution of ML workspace RP access-policy write permission on the shared Key Vault.')
-param deployFoundry bool = false
+@description('Deploy the AI Foundry hub + project + CMK-encrypted ACR (model registry).')
+param deployFoundry bool = true
 
 @description('Tags applied to the resource group and every resource.')
 param tags object = {
@@ -122,6 +122,8 @@ module foundry 'modules/foundry.bicep' = if (deployFoundry) {
     location: location
     namePrefix: namePrefix
     tags: tags
+    kekUriWithVersion: keyvault.outputs.kekUriWithVersion
+    keyVaultName: keyvault.outputs.keyVaultName
   }
 }
 
@@ -135,6 +137,8 @@ output cvmPrincipalId string = deployCvm ? cvm.outputs.cvmPrincipalId : ''
 output cvmPrivateIp string = deployCvm ? cvm.outputs.privateIpAddress : ''
 output foundryHubName string = deployFoundry ? foundry!.outputs.hubName : ''
 output foundryProjectName string = deployFoundry ? foundry!.outputs.projectName : ''
+output foundryAcrName string = deployFoundry ? foundry!.outputs.acrName : ''
+output foundryAcrLoginServer string = deployFoundry ? foundry!.outputs.acrLoginServer : ''
 output cmkVmName string = deployCmkVm ? vmCmk!.outputs.vmName : ''
 output cmkVmPrivateIp string = deployCmkVm ? vmCmk!.outputs.privateIpAddress : ''
 output diskEncryptionSetName string = deployCmkVm ? vmCmk!.outputs.diskEncryptionSetName : ''
