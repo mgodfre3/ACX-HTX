@@ -1,0 +1,1011 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.42.1.51946",
+      "templateHash": "6304587974785525035"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "westus2",
+      "metadata": {
+        "description": "Azure region that mirrors the ALDO stamp (used for ARM metadata)."
+      }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "ACX-HTX-ALDO",
+      "metadata": {
+        "description": "Resource group name for the ALDO-side sovereign stack."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "htxaldo",
+      "minLength": 3,
+      "maxLength": 8,
+      "metadata": {
+        "description": "Short name prefix."
+      }
+    },
+    "customLocationId": {
+      "type": "string",
+      "metadata": {
+        "description": "Custom Location resource ID of the ALDO Tokyo WKLD stamp."
+      }
+    },
+    "logicalNetworkName": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing logical network name on the ALDO stamp used for workload VMs and Arc-AKS."
+      }
+    },
+    "logicalNetworkResourceGroup": {
+      "type": "string",
+      "defaultValue": "[parameters('resourceGroupName')]",
+      "metadata": {
+        "description": "Resource group that contains the existing logical network."
+      }
+    },
+    "ubuntuGalleryImageId": {
+      "type": "string",
+      "metadata": {
+        "description": "Gallery image resource ID for Ubuntu 22.04 (Vault VM)."
+      }
+    },
+    "windowsGalleryImageId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Gallery image resource ID for Windows Server 2022 (optional jumpbox)."
+      }
+    },
+    "deployJumpbox": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the optional Windows Server 2022 jumpbox VM."
+      }
+    },
+    "vaultAdminSshPublicKey": {
+      "type": "string",
+      "metadata": {
+        "description": "SSH public key for the Vault VM admin user."
+      }
+    },
+    "vaultAdminUsername": {
+      "type": "string",
+      "defaultValue": "htxadmin",
+      "metadata": {
+        "description": "Admin username for the Vault VM."
+      }
+    },
+    "jumpboxAdminPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Windows jumpbox admin password (required only if deployJumpbox=true)."
+      }
+    },
+    "sovereignAcrName": {
+      "type": "string",
+      "defaultValue": "acxhtxacraguuve6o",
+      "metadata": {
+        "description": "Azure ACR to sync from for the Connected Registry mirror."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Project": "HTX",
+        "Created By": "Michael Godfrey",
+        "Environment": "ALDO-Tokyo-WKLD"
+      },
+      "metadata": {
+        "description": "Tags applied to every resource."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('resourceGroupName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "vault-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "customLocationId": {
+            "value": "[parameters('customLocationId')]"
+          },
+          "logicalNetworkName": {
+            "value": "[parameters('logicalNetworkName')]"
+          },
+          "logicalNetworkResourceGroup": {
+            "value": "[parameters('logicalNetworkResourceGroup')]"
+          },
+          "ubuntuGalleryImageId": {
+            "value": "[parameters('ubuntuGalleryImageId')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('vaultAdminUsername')]"
+          },
+          "adminSshPublicKey": {
+            "value": "[parameters('vaultAdminSshPublicKey')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "14570966939998096888"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region ARM metadata."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "customLocationId": {
+              "type": "string",
+              "metadata": {
+                "description": "Custom Location resource ID of the ALDO stamp."
+              }
+            },
+            "logicalNetworkName": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing logical network name."
+              }
+            },
+            "logicalNetworkResourceGroup": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource group containing the logical network."
+              }
+            },
+            "ubuntuGalleryImageId": {
+              "type": "string",
+              "metadata": {
+                "description": "Gallery image resource ID for Ubuntu 22.04."
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Admin username for the VM."
+              }
+            },
+            "adminSshPublicKey": {
+              "type": "string",
+              "metadata": {
+                "description": "SSH public key for the admin user."
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_A4_v2",
+              "metadata": {
+                "description": "VM size class (Azure Local sizing)."
+              }
+            }
+          },
+          "variables": {
+            "vmName": "[format('{0}-vault', parameters('namePrefix'))]",
+            "nicName": "[format('{0}-nic', variables('vmName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.HybridCompute/machines",
+              "apiVersion": "2024-07-10",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "AzureStackHCI",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {}
+            },
+            {
+              "type": "Microsoft.AzureStackHCI/networkInterfaces",
+              "apiVersion": "2024-01-01",
+              "name": "[variables('nicName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[resourceId(parameters('logicalNetworkResourceGroup'), 'Microsoft.AzureStackHCI/logicalNetworks', parameters('logicalNetworkName'))]"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.AzureStackHCI/virtualMachineInstances",
+              "apiVersion": "2024-01-01",
+              "scope": "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
+              "name": "default",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "computerName": "htxvault",
+                  "linuxConfiguration": {
+                    "disablePasswordAuthentication": true,
+                    "ssh": {
+                      "publicKeys": [
+                        {
+                          "keyData": "[parameters('adminSshPublicKey')]",
+                          "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]"
+                        }
+                      ]
+                    },
+                    "provisionVMAgent": true
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "id": "[parameters('ubuntuGalleryImageId')]"
+                  },
+                  "osDisk": {
+                    "osType": "Linux"
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName'))]"
+                    }
+                  ]
+                },
+                "securityProfile": {
+                  "enableTPM": true
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
+                "[resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "value": "[variables('vmName')]"
+            },
+            "privateIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName')), '2024-01-01').ipConfigurations[0].properties.privateIPAddress]"
+            },
+            "arcMachineId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]"
+            },
+            "arcMachinePrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.HybridCompute/machines', variables('vmName')), '2024-07-10', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "aks-arc-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "customLocationId": {
+            "value": "[parameters('customLocationId')]"
+          },
+          "logicalNetworkName": {
+            "value": "[parameters('logicalNetworkName')]"
+          },
+          "logicalNetworkResourceGroup": {
+            "value": "[parameters('logicalNetworkResourceGroup')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "6423099574081319436"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region ARM metadata."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "customLocationId": {
+              "type": "string",
+              "metadata": {
+                "description": "Custom Location resource ID of the ALDO stamp."
+              }
+            },
+            "logicalNetworkName": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing logical network name."
+              }
+            },
+            "logicalNetworkResourceGroup": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource group containing the logical network."
+              }
+            },
+            "kubernetesVersion": {
+              "type": "string",
+              "defaultValue": "1.29.4",
+              "metadata": {
+                "description": "Kubernetes version supported by the ALDO stamp AKS-Arc extension."
+              }
+            },
+            "systemVmSize": {
+              "type": "string",
+              "defaultValue": "Standard_A4_v2",
+              "metadata": {
+                "description": "System nodepool VM size."
+              }
+            },
+            "systemNodeCount": {
+              "type": "int",
+              "defaultValue": 3,
+              "metadata": {
+                "description": "System nodepool node count."
+              }
+            },
+            "gpuVmSize": {
+              "type": "string",
+              "defaultValue": "Standard_NC24ads_A100_v4",
+              "metadata": {
+                "description": "GPU nodepool VM size with A100 passthrough."
+              }
+            },
+            "gpuNodeCount": {
+              "type": "int",
+              "defaultValue": 2,
+              "metadata": {
+                "description": "GPU nodepool node count."
+              }
+            }
+          },
+          "variables": {
+            "clusterName": "[format('{0}-aks', parameters('namePrefix'))]",
+            "logicalNetworkId": "[resourceId(parameters('logicalNetworkResourceGroup'), 'Microsoft.AzureStackHCI/logicalNetworks', parameters('logicalNetworkName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Kubernetes/connectedClusters",
+              "apiVersion": "2024-01-01",
+              "name": "[variables('clusterName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "ProvisionedCluster",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "agentPublicKeyCertificate": "",
+                "aadProfile": {
+                  "enableAzureRBAC": false
+                },
+                "distribution": "aks_edge",
+                "infrastructure": "azure_stack_hci"
+              }
+            },
+            {
+              "type": "Microsoft.HybridContainerService/provisionedClusterInstances",
+              "apiVersion": "2024-01-01",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName'))]",
+              "name": "default",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "agentPoolProfiles": [],
+                "cloudProviderProfile": {
+                  "infraNetworkProfile": {
+                    "vnetSubnetIds": [
+                      "[variables('logicalNetworkId')]"
+                    ]
+                  }
+                },
+                "clusterVMAccessProfile": {},
+                "controlPlane": {
+                  "count": 1,
+                  "vmSize": "[parameters('systemVmSize')]"
+                },
+                "kubernetesVersion": "[parameters('kubernetesVersion')]",
+                "licenseProfile": {
+                  "azureHybridBenefit": "False"
+                },
+                "linuxProfile": {
+                  "ssh": {
+                    "publicKeys": []
+                  }
+                },
+                "networkProfile": {
+                  "loadBalancerProfile": {
+                    "count": 0
+                  },
+                  "networkPolicy": "calico",
+                  "podCidr": "10.244.0.0/16"
+                },
+                "storageProfile": {
+                  "nfsCsiDriver": {
+                    "enabled": false
+                  },
+                  "smbCsiDriver": {
+                    "enabled": false
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.HybridContainerService/provisionedClusterInstances/agentPools",
+              "apiVersion": "2024-01-01",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName'))]",
+              "name": "[format('{0}/{1}', 'default', 'system')]",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "osType": "Linux",
+                "osSKU": "CBLMariner",
+                "vmSize": "[parameters('systemVmSize')]",
+                "count": "[parameters('systemNodeCount')]",
+                "nodeLabels": {
+                  "workload": "system"
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName')), 'Microsoft.HybridContainerService/provisionedClusterInstances', 'default')]"
+              ]
+            },
+            {
+              "type": "Microsoft.HybridContainerService/provisionedClusterInstances/agentPools",
+              "apiVersion": "2024-01-01",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName'))]",
+              "name": "[format('{0}/{1}', 'default', 'gpu')]",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "osType": "Linux",
+                "osSKU": "CBLMariner",
+                "vmSize": "[parameters('gpuVmSize')]",
+                "count": "[parameters('gpuNodeCount')]",
+                "nodeLabels": {
+                  "htx.aldo/gpu": "a100",
+                  "htx.aldo/stamp": "tokyo-wkld",
+                  "workload": "inference"
+                },
+                "nodeTaints": [
+                  "nvidia.com/gpu=true:NoSchedule"
+                ]
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName')), 'Microsoft.HybridContainerService/provisionedClusterInstances', 'default')]",
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName')), 'Microsoft.HybridContainerService/provisionedClusterInstances/agentPools', 'default', 'system')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "connectedClusterName": {
+              "type": "string",
+              "value": "[variables('clusterName')]"
+            },
+            "connectedClusterId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName'))]"
+            },
+            "provisionedClusterId": {
+              "type": "string",
+              "value": "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', variables('clusterName')), 'Microsoft.HybridContainerService/provisionedClusterInstances', 'default')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "aks-ext-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aksArcClusterName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'aks-arc-deploy'), '2025-04-01').outputs.connectedClusterName.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "394394636739048642"
+            }
+          },
+          "parameters": {
+            "aksArcClusterName": {
+              "type": "string",
+              "metadata": {
+                "description": "AKS-Arc cluster name."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-04-01-preview",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "nvidia-gpu-operator",
+              "properties": {
+                "extensionType": "microsoft.arcgpu.nvidiadeviceplugin",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "gpu-resources"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-04-01-preview",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "azure-keyvault-secrets-provider",
+              "properties": {
+                "extensionType": "microsoft.azurekeyvaultsecretsprovider",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "kube-system"
+                  }
+                },
+                "configurationSettings": {
+                  "secrets-store-csi-driver.syncSecret.enabled": "true",
+                  "secrets-store-csi-driver.enableSecretRotation": "true"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-04-01-preview",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "azuremonitor-containers",
+              "properties": {
+                "extensionType": "microsoft.azuremonitor.containers",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "azuremonitor"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-04-01-preview",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "flux",
+              "properties": {
+                "extensionType": "microsoft.flux",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "flux-system"
+                  }
+                },
+                "configurationSettings": {
+                  "multiTenancy.enforce": "false"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/fluxConfigurations",
+              "apiVersion": "2024-04-01-preview",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "htx-workloads",
+              "properties": {
+                "scope": "cluster",
+                "namespace": "htx-foundry-local",
+                "sourceKind": "GitRepository",
+                "gitRepository": {
+                  "url": "https://github.com/mgodfre3/ACX-HTX",
+                  "repositoryRef": {
+                    "branch": "master"
+                  },
+                  "timeoutInSeconds": 600,
+                  "syncIntervalInSeconds": 300
+                },
+                "kustomizations": {
+                  "foundryLocal": {
+                    "path": "./arc-aks",
+                    "dependsOn": [],
+                    "timeoutInSeconds": 600,
+                    "syncIntervalInSeconds": 300,
+                    "retryIntervalInSeconds": 300,
+                    "prune": true,
+                    "force": false
+                  }
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'flux')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "extensionNames": {
+              "type": "array",
+              "value": [
+                "nvidia-gpu-operator",
+                "azure-keyvault-secrets-provider",
+                "azuremonitor-containers",
+                "flux"
+              ]
+            },
+            "fluxConfigName": {
+              "type": "string",
+              "value": "htx-workloads"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'aks-arc-deploy')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployJumpbox')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "jumpbox-deploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "namePrefix": {
+            "value": "[parameters('namePrefix')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "customLocationId": {
+            "value": "[parameters('customLocationId')]"
+          },
+          "logicalNetworkName": {
+            "value": "[parameters('logicalNetworkName')]"
+          },
+          "logicalNetworkResourceGroup": {
+            "value": "[parameters('logicalNetworkResourceGroup')]"
+          },
+          "windowsGalleryImageId": {
+            "value": "[parameters('windowsGalleryImageId')]"
+          },
+          "adminUsername": {
+            "value": "[parameters('vaultAdminUsername')]"
+          },
+          "adminPassword": {
+            "value": "[parameters('jumpboxAdminPassword')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.42.1.51946",
+              "templateHash": "16950598611357311484"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region ARM metadata."
+              }
+            },
+            "namePrefix": {
+              "type": "string",
+              "metadata": {
+                "description": "Short name prefix."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to every resource."
+              }
+            },
+            "customLocationId": {
+              "type": "string",
+              "metadata": {
+                "description": "Custom Location resource ID."
+              }
+            },
+            "logicalNetworkName": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing logical network name."
+              }
+            },
+            "logicalNetworkResourceGroup": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource group containing the logical network."
+              }
+            },
+            "windowsGalleryImageId": {
+              "type": "string",
+              "metadata": {
+                "description": "Gallery image resource ID for Windows Server 2022."
+              }
+            },
+            "adminUsername": {
+              "type": "string",
+              "metadata": {
+                "description": "Local admin username."
+              }
+            },
+            "adminPassword": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Local admin password."
+              }
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_A4_v2",
+              "metadata": {
+                "description": "VM size."
+              }
+            }
+          },
+          "variables": {
+            "vmName": "[format('{0}-jumpbox', parameters('namePrefix'))]",
+            "nicName": "[format('{0}-nic', variables('vmName'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.HybridCompute/machines",
+              "apiVersion": "2024-07-10",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "AzureStackHCI",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {}
+            },
+            {
+              "type": "Microsoft.AzureStackHCI/networkInterfaces",
+              "apiVersion": "2024-01-01",
+              "name": "[variables('nicName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "ipconfig1",
+                    "properties": {
+                      "subnet": {
+                        "id": "[resourceId(parameters('logicalNetworkResourceGroup'), 'Microsoft.AzureStackHCI/logicalNetworks', parameters('logicalNetworkName'))]"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.AzureStackHCI/virtualMachineInstances",
+              "apiVersion": "2024-01-01",
+              "scope": "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
+              "name": "default",
+              "extendedLocation": {
+                "type": "CustomLocation",
+                "name": "[parameters('customLocationId')]"
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "adminPassword": "[parameters('adminPassword')]",
+                  "computerName": "htxjumpbox",
+                  "windowsConfiguration": {
+                    "provisionVMAgent": true,
+                    "enableAutomaticUpdates": true
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "id": "[parameters('windowsGalleryImageId')]"
+                  },
+                  "osDisk": {
+                    "osType": "Windows"
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName'))]"
+                    }
+                  ]
+                },
+                "securityProfile": {
+                  "enableTPM": true
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
+                "[resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "value": "[variables('vmName')]"
+            },
+            "privateIpAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName')), '2024-01-01').ipConfigurations[0].properties.privateIPAddress]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "resourceGroupName": {
+      "type": "string",
+      "value": "[parameters('resourceGroupName')]"
+    },
+    "vaultVmName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vault-deploy'), '2025-04-01').outputs.vmName.value]"
+    },
+    "vaultVmPrivateIp": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vault-deploy'), '2025-04-01').outputs.privateIpAddress.value]"
+    },
+    "aksArcClusterName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'aks-arc-deploy'), '2025-04-01').outputs.connectedClusterName.value]"
+    },
+    "connectedRegistryInstallHint": {
+      "type": "string",
+      "value": "[format('Run: az acr connected-registry install info --registry {0} --name aldo-tokyo-wkld', parameters('sovereignAcrName'))]"
+    }
+  }
+}
