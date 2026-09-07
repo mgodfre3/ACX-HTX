@@ -21,14 +21,14 @@ Bicep templates for the Azure Local Disconnected Operations (ALDO) Tokyo WKLD st
 **Baked into AKS-Arc — nothing to pre-stage:**
 - **Mariner Linux 3 (CBL-Mariner)** — control plane + all nodepool nodes. Pulled by the arc-appliance from the AKS-Arc extension.
 
-**To pre-stage in the ALDO stamp gallery (please handle):**
+**Pre-staged on the ALDO Tokyo WKLD stamp (confirmed):**
 
 | Image | Purpose | Source |
 |---|---|---|
-| **Ubuntu Server 22.04 LTS Gen2** | Vault VM (sovereign local key vault) | Azure Marketplace: `Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest` — download VHD, upload as an `azurestackhci/galleryImages` item |
-| **Windows Server 2022 Datacenter Gen2** | Optional jumpbox | Azure Marketplace: `MicrosoftWindowsServer:WindowsServer:2022-datacenter-g2:latest` |
+| **Ubuntu Server 22.04 LTS Gen2** | Vault VM (sovereign local key vault) | Canonical marketplace VHD |
+| **Windows Server 2025 Datacenter Gen2** | Optional jumpbox | Microsoft marketplace VHD (2025 is newer than the original 2022 spec — same architecture, cleaner OS) |
 
-Once uploaded, pass their **full resource IDs** as parameters (`ubuntuGalleryImageId`, `windowsGalleryImageId`).
+Pass their **full resource IDs** as parameters (`ubuntuGalleryImageId`, `windowsGalleryImageId`).
 
 **Container images** (pulled through the Connected Registry mirror once activated):
 - `mcr.microsoft.com/foundry-local:<version>` (Microsoft container)

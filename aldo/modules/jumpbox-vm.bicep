@@ -1,4 +1,4 @@
-// Optional Windows Server 2022 jumpbox on the ALDO stamp.
+// Optional Windows Server 2025 jumpbox on the ALDO stamp.
 
 @description('Azure region ARM metadata.')
 param location string
@@ -18,7 +18,7 @@ param logicalNetworkName string
 @description('Resource group containing the logical network.')
 param logicalNetworkResourceGroup string
 
-@description('Gallery image resource ID for Windows Server 2022.')
+@description('Gallery image resource ID for Windows Server 2025.')
 param windowsGalleryImageId string
 
 @description('Local admin username.')
