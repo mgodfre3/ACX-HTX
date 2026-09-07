@@ -71,23 +71,29 @@ Before running the Bicep, gather these and populate `main.bicepparam` (or export
 
 ## Deploy
 
+**Region:** ALDO stamps always use the special `Autonomous` region name. This is the ARM location value for both the RG and all resources.
+
 ```powershell
-$env:ALDO_CUSTOM_LOCATION_ID = '/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ExtendedLocation/customLocations/<cl>'
-$env:ALDO_LOGICAL_NETWORK_NAME = '<lnet-name>'
-$env:ALDO_LOGICAL_NETWORK_RG = 'ACX-HTX-ALDO'
-$env:ALDO_UBUNTU_IMAGE_ID = '/subscriptions/<sub>/resourceGroups/<gallery-rg>/providers/Microsoft.AzureStackHCI/galleryImages/ubuntu-2204-lts'
-$env:ALDO_VAULT_SSH_PUBKEY = Get-Content ~/.ssh/htx-vault.pub -Raw
+$env:ALDO_CUSTOM_LOCATION_ID  = '<from Get-AzCustomLocation>'
+$env:ALDO_LOGICAL_NETWORK_NAME = '<name>'
+$env:ALDO_LOGICAL_NETWORK_RG   = 'ACX-HTX-ALDO'
+$env:ALDO_UBUNTU_IMAGE_ID      = '<Ubuntu 22.04 gallery image id>'
+$env:ALDO_WINDOWS_IMAGE_ID     = '<Windows 2025 gallery image id>'
+$env:ALDO_VAULT_SSH_PUBKEY     = Get-Content ~/.ssh/htx-vault.pub -Raw
 
-az deployment sub what-if `
-  --location westus2 `
-  --template-file aldo/main.bicep `
-  --parameters aldo/main.bicepparam
+# What-if
+New-AzSubscriptionDeployment `
+  -Location 'Autonomous' `
+  -TemplateFile 'aldo/main.bicep' `
+  -TemplateParameterFile 'aldo/main.bicepparam' `
+  -WhatIf
 
-az deployment sub create `
-  --location westus2 `
-  --template-file aldo/main.bicep `
-  --parameters aldo/main.bicepparam `
-  --name "aldo-htx-$(Get-Date -Format yyyyMMdd-HHmm)"
+# Deploy
+New-AzSubscriptionDeployment `
+  -Location 'Autonomous' `
+  -TemplateFile 'aldo/main.bicep' `
+  -TemplateParameterFile 'aldo/main.bicepparam' `
+  -Name "aldo-htx-$(Get-Date -Format yyyyMMdd-HHmm)"
 ```
 
 ## Post-deploy checklist

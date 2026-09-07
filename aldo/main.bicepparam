@@ -1,6 +1,6 @@
 using 'main.bicep'
 
-param location = 'westus2'
+param location = 'Autonomous'
 param resourceGroupName = 'ACX-HTX-ALDO'
 param namePrefix = 'htxaldo'
 

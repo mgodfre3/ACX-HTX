@@ -5,15 +5,15 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "6304587974785525035"
+      "templateHash": "1081296969070258364"
     }
   },
   "parameters": {
     "location": {
       "type": "string",
-      "defaultValue": "westus2",
+      "defaultValue": "Autonomous",
       "metadata": {
-        "description": "Azure region that mirrors the ALDO stamp (used for ARM metadata)."
+        "description": "Azure region for ALDO resources. Always \"Autonomous\" for ALDO stamps."
       }
     },
     "resourceGroupName": {
@@ -816,7 +816,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "16950598611357311484"
+              "templateHash": "7294481403454292729"
             }
           },
           "parameters": {
@@ -859,7 +859,7 @@
             "windowsGalleryImageId": {
               "type": "string",
               "metadata": {
-                "description": "Gallery image resource ID for Windows Server 2022."
+                "description": "Gallery image resource ID for Windows Server 2025."
               }
             },
             "adminUsername": {

@@ -14,8 +14,8 @@ targetScope = 'subscription'
 //   - Arc-enabled subscription with HybridContainerService + AzureStackHCI RPs registered
 // ============================================================================
 
-@description('Azure region that mirrors the ALDO stamp (used for ARM metadata).')
-param location string = 'westus2'
+@description('Azure region for ALDO resources. Always "Autonomous" for ALDO stamps.')
+param location string = 'Autonomous'
 
 @description('Resource group name for the ALDO-side sovereign stack.')
 param resourceGroupName string = 'ACX-HTX-ALDO'
