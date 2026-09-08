@@ -40,8 +40,11 @@ param ubuntuGalleryImageId string
 @description('Gallery image resource ID for Windows Server 2022 (optional jumpbox).')
 param windowsGalleryImageId string = ''
 
-@description('Deploy the optional Windows Server 2022 jumpbox VM.')
+@description('Deploy the optional Windows Server 2025 jumpbox VM.')
 param deployJumpbox bool = false
+
+@description('Kubernetes version supported by the ALDO stamp AKS-Arc extension. Discover with: az aksarc get-versions -l Autonomous')
+param kubernetesVersion string = '1.30.6'
 
 @description('SSH public key for the Vault VM admin user.')
 param vaultAdminSshPublicKey string

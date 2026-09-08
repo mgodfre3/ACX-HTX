@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "2660794151319390634"
+      "templateHash": "2396336846763974605"
     }
   },
   "parameters": {
@@ -68,7 +68,14 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Deploy the optional Windows Server 2022 jumpbox VM."
+        "description": "Deploy the optional Windows Server 2025 jumpbox VM."
+      }
+    },
+    "kubernetesVersion": {
+      "type": "string",
+      "defaultValue": "1.30.6",
+      "metadata": {
+        "description": "Kubernetes version supported by the ALDO stamp AKS-Arc extension. Discover with: az aksarc get-versions -l Autonomous"
       }
     },
     "vaultAdminSshPublicKey": {
@@ -177,7 +184,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "2522404528029159806"
+              "templateHash": "1713039323444537006"
             }
           },
           "parameters": {
@@ -284,7 +291,7 @@
               "name": "[variables('vmName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
-              "kind": "AzureStackHCI",
+              "kind": "HCI",
               "identity": {
                 "type": "SystemAssigned"
               },
@@ -394,6 +401,12 @@
           },
           "logicalNetworkResourceGroup": {
             "value": "[parameters('logicalNetworkResourceGroup')]"
+          },
+          "clusterSshPublicKey": {
+            "value": "[parameters('vaultAdminSshPublicKey')]"
+          },
+          "kubernetesVersion": {
+            "value": "[parameters('kubernetesVersion')]"
           }
         },
         "template": {
@@ -403,7 +416,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "6423099574081319436"
+              "templateHash": "14634254302416281147"
             }
           },
           "parameters": {
@@ -445,9 +458,15 @@
             },
             "kubernetesVersion": {
               "type": "string",
-              "defaultValue": "1.29.4",
+              "defaultValue": "1.30.6",
               "metadata": {
-                "description": "Kubernetes version supported by the ALDO stamp AKS-Arc extension."
+                "description": "Kubernetes version supported by the ALDO stamp AKS-Arc extension. Discover with: az aksarc get-versions -l Autonomous"
+              }
+            },
+            "clusterSshPublicKey": {
+              "type": "string",
+              "metadata": {
+                "description": "SSH public key for the AKS-Arc cluster control plane nodes and node pools."
               }
             },
             "systemVmSize": {
@@ -532,7 +551,11 @@
                 },
                 "linuxProfile": {
                   "ssh": {
-                    "publicKeys": []
+                    "publicKeys": [
+                      {
+                        "keyData": "[parameters('clusterSshPublicKey')]"
+                      }
+                    ]
                   }
                 },
                 "networkProfile": {
@@ -895,7 +918,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7133228880948478636"
+              "templateHash": "15766226820735963816"
             }
           },
           "parameters": {
@@ -1002,7 +1025,7 @@
               "name": "[variables('vmName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
-              "kind": "AzureStackHCI",
+              "kind": "HCI",
               "identity": {
                 "type": "SystemAssigned"
               },
