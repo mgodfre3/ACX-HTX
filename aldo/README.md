@@ -1,29 +1,126 @@
-# ALDO-Side Sovereign Compute + AI Stack
+# ALDO-Side Sovereign Compute Stack (revised — no Arc-AKS)
 
-Bicep templates for the Azure Local Disconnected Operations (ALDO) Tokyo-WKLD stamp. Deploys the on-prem side of the sovereign hybrid demo, following the same **Microsoft.Foundry Arc extension** pattern used by the Adaptive Cloud Lab MWC26 demo.
+Bicep templates for the Azure Local Disconnected Operations (ALDO) Tokyo-WKLD stamp.
+
+**Design decision (2026-09-08):** Arc-AKS on Azure Local does not support A100 GPUs — the GPU operator pattern is limited to T4/A2 tier. We pivoted from AKS-Arc + Foundry Arc extension to a **Windows Server 2025 VM with A100 DDA passthrough running Foundry Local directly**. This is the same pattern the MWC26 demo uses on its production-side ALDO stamps and unblocks the A100 hardware you already have deployed.
 
 ## What this deploys
 
 | # | Resource | Provider | Notes |
 |---|---|---|---|
-| 1 | Ubuntu 24.04 VM running HashiCorp Vault | `Microsoft.AzureStackHCI/virtualMachineInstances@2025-02-01-preview` | Sovereign local key vault. Holds on-prem mirror of `htx-kek`. Stand-in for Luna HSM. Sized 4 vCPU / 8 GB via `hardwareProfile.processors + memoryMB`. |
-| 2 | Arc-AKS provisioned cluster | `Microsoft.HybridContainerService/provisionedClusterInstances@2024-01-01` | System nodepool (3 nodes) + GPU nodepool (2 × A100). Node OS = Mariner Linux 3 (baked into extension). |
-| 3 | AKS extensions | `Microsoft.KubernetesConfiguration/extensions@2024-11-01` | In install order: `Microsoft.CertManagement` → NVIDIA GPU Operator → KV Secrets Store CSI → Azure Monitor → **`Microsoft.Foundry`** → Flux |
-| 4 | Flux GitOps binding | `Microsoft.KubernetesConfiguration/fluxConfigurations` | Watches `github.com/mgodfre3/ACX-HTX`, path `./arc-aks/foundry-local`. Delivers ModelDeployment CRs. |
-| 5 | Windows Server 2025 jumpbox (optional) | `Microsoft.AzureStackHCI/virtualMachineInstances` | Off by default (`deployJumpbox=false`) |
+| 1 | Ubuntu 24.04 VM running HashiCorp Vault | `Microsoft.AzureStackHCI/virtualMachineInstances@2025-02-01-preview` | Sovereign local key vault. Holds on-prem mirror of `htx-kek`. Stand-in for Luna HSM. |
+| 2 | **Windows Server 2025 VM with A100 DDA** running Foundry Local | same | Sovereign inference host. Phi-4 mini + HTX antenna detector. Model cache on CMK-encrypted data disk. |
+| 3 | Windows Server 2025 jumpbox (optional) | same | Off by default (`deployJumpbox=false`) |
 
 ## Azure Local vs Azure — Key ARM differences
 
 This stack uses **`Microsoft.AzureStackHCI`** for VMs, not `Microsoft.Compute`. Notable differences from Azure VMs:
 
 - **Sizing:** `hardwareProfile.processors` (vCPU count) + `hardwareProfile.memoryMB`, **not** `vmSize` strings like `Standard_D2as_v5`
+- **GPU passthrough:** `hardwareProfile.virtualMachineGPUs` with `gpuName` + `assignmentType` (`GpuDDA` for whole GPU, `GpuP` for partitioned). Discover GPU names with `Get-VMHostPartitionableGpu` on any ALDO host.
 - **API version:** `2025-02-01-preview` (or newer) — the API surface evolves quickly
 - **Extended location:** every VM/NIC has an `extendedLocation` pointing at the ALDO stamp's Custom Location
+- **`kind: 'HCI'`** on `Microsoft.HybridCompute/machines` (NOT `'AzureStackHCI'`)
 - **Two resources per VM:** an `Microsoft.HybridCompute/machines` (Arc projection) + a child `virtualMachineInstances` (the actual VM)
 - **No `userData` / cloud-init** on Linux — bootstrap is done post-boot via SSH
 - **Storage:** `imageReference.id` points at a `galleryImages` resource on the stamp, not a marketplace URN
 
 Reference: [Microsoft.AzureStackHCI/virtualMachineInstances](https://learn.microsoft.com/en-us/azure/templates/microsoft.azurestackhci/virtualmachineinstances?pivots=deployment-language-bicep)
+
+## VM Images
+
+**Pre-staged on the ALDO Tokyo-WKLD stamp (confirmed):**
+
+| Image | Purpose | Resource ID (Tokyo-WKLD stamp) |
+|---|---|---|
+| **Ubuntu Server 24.04 LTS Gen2** | Vault VM (sovereign local key vault) | `/subscriptions/ef23bab2-.../resourceGroups/Tokyo-WKLD/providers/microsoft.azurestackhci/galleryimages/Ubuntu2404` |
+| **Windows Server 2025 Datacenter Gen2** | Foundry Local VM + optional jumpbox | `/subscriptions/ef23bab2-.../resourceGroups/Tokyo-WKLD/providers/microsoft.azurestackhci/galleryimages/WS2025` |
+
+## Foundry Local — Runs Natively on Windows
+
+Foundry Local installs via `winget install -e --id Microsoft.FoundryLocal` on the Windows VM. It:
+
+1. Detects the A100 via CUDA and NVIDIA driver
+2. Pulls Phi-4 mini from the catalog on first run (~4.5 GB, cached locally)
+3. Serves inference on `http://<vm-ip>:5273`
+4. Supports BYO ONNX models (e.g., our HTX antenna detector pulled from the sovereign ACR mirror)
+
+Full bootstrap steps: `aldo/scripts/bootstrap-foundry-vm.md`
+
+## Sovereign Key Custody Chain
+
+Even without Arc-AKS, the customer-key story remains intact:
+
+- `htx-kek` in Azure Key Vault (Premium HSM) — backs Storage CMK, VM disk CMK, ACR CMK on the Azure side
+- `htx-kek` mirror in the on-prem HashiCorp Vault (`htxaldo-vault`) — held on-prem, no Microsoft access
+- **Foundry model cache** on a data disk encrypted with a DEK generated by the local Vault
+- **Revoke** the local `htx-kek` → BitLocker-encrypted model cache immediately becomes unreadable
+
+In production, both Vaults are replaced with Luna HSMs; demo pattern is unchanged.
+
+## Prereqs
+
+1. **RP registrations** on the subscription:
+   ```powershell
+   Register-AzResourceProvider -ProviderNamespace Microsoft.AzureStackHCI
+   Register-AzResourceProvider -ProviderNamespace Microsoft.HybridCompute
+   ```
+
+2. **SSH keypair** for the Vault VM admin. Public key baked into `main.bicepparam`; private key in the session workspace.
+
+3. **GPU name discovery** on the ALDO cluster (run on any host node):
+   ```powershell
+   Get-VMHostPartitionableGpu | Select-Object Name
+   ```
+   Set the result as `$env:ALDO_FOUNDRY_GPU_NAME` before deploy. Leave blank for CPU-only Foundry Local.
+
+## Deploy
+
+**Region:** ALDO stamps always use the special `Autonomous` region name.
+
+**Subscription context:** ALDO ARM lives on the stamp's own Autonomous ARM plane — separate from public Azure Cloud. Run from a workstation signed into the Autonomous subscription (`ef23bab2-5bd7-afa3-3013-d5116a941684` for Tokyo-WKLD).
+
+```powershell
+# Sign into the Autonomous plane
+Connect-AzAccount
+Set-AzContext -Subscription 'ef23bab2-5bd7-afa3-3013-d5116a941684'
+
+# Set required env vars
+$pw = Read-Host -AsSecureString "Foundry VM admin password"
+$env:ALDO_FOUNDRY_PASSWORD = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw))
+$env:ALDO_FOUNDRY_GPU_NAME = 'NVIDIA A100 80GB PCIe'   # or the exact string from Get-VMHostPartitionableGpu
+
+# Deploy
+./aldo/scripts/deploy.ps1
+```
+
+## Post-deploy checklist
+
+1. **Bootstrap the Vault VM** (`aldo/scripts/init-vault.sh`) — initialize Vault, create `htx-kek`
+2. **Bootstrap the Foundry VM** (`aldo/scripts/bootstrap-foundry-vm.md`) — install NVIDIA driver, Foundry Local, pull Phi-4, register antenna detector
+3. **Install ACR Connected Registry mirror** (optional but preferred for sovereign OCI pulls)
+4. **Encrypt the Foundry model cache** with a DEK from the local Vault
+5. **Test end-to-end** — hit the Phi-4 endpoint, then the antenna detector
+
+## What we lost by dropping Arc-AKS
+
+- No Kubernetes-native model rollout via Flux — replaced by direct Foundry Local CLI + a small pull-script on a timer
+- No cluster-level RBAC — Windows ACLs on the model cache instead
+- No `Microsoft.Foundry` Arc extension — Foundry Local installed via winget directly
+
+## What we kept
+
+- **A100 hardware works** (the whole reason for the pivot)
+- Full customer-key custody chain across Azure + on-prem
+- Same OCI-based model distribution (ACR → sovereign mirror → Foundry Local)
+- Same sovereign narrative for leadership
+
+## What's still speculative
+
+- **GPU passthrough (DDA) via ARM on ALDO** — the `virtualMachineGPUs` property in the HCI VM schema is preview. If ARM rejects it on your stamp, the fallback is to deploy the VM without GPU and attach via `Add-VMGpuPartitionAdapter` post-boot on the host. Update `main.bicepparam` `foundryGpuName = ''` to skip.
+- **A100 DDA on Azure Local** — verify the A100 is in `Get-VMHostPartitionableGpu` output on your ALDO cluster. If not, the driver isn't loaded or the GPU isn't marked for DDA.
+
 
 ## VM Images Expected
 
