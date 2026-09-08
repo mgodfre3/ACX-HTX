@@ -24,6 +24,20 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
+# --- Ensure Bicep is on PATH ---
+# winget installs Bicep to %LOCALAPPDATA%\Microsoft\WinGet\Packages\Microsoft.Bicep_*\
+# but often does not update PATH until a new shell is opened. Add it here.
+$bicepCandidate = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter 'bicep.exe' -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($bicepCandidate -and (-not (Get-Command bicep -ErrorAction SilentlyContinue))) {
+    $env:PATH = "$($bicepCandidate.DirectoryName);$env:PATH"
+    Write-Host "==> Added Bicep to PATH: $($bicepCandidate.DirectoryName)" -ForegroundColor DarkGray
+}
+if (-not (Get-Command bicep -ErrorAction SilentlyContinue)) {
+    throw "Bicep CLI not found. Install with: winget install -e --id Microsoft.Bicep  (then reopen shell, or the script will find it under LOCALAPPDATA)."
+}
+& bicep --version | ForEach-Object { Write-Host "==> $_" -ForegroundColor DarkGray }
+
 Write-Host "==> Setting subscription context..." -ForegroundColor Cyan
 Set-AzContext -Subscription $SubscriptionId | Out-Null
 $ctx = Get-AzContext
