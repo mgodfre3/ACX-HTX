@@ -22,8 +22,11 @@ param logicalNetworkName string
 @description('Resource group containing the logical network.')
 param logicalNetworkResourceGroup string
 
-@description('Kubernetes version supported by the ALDO stamp AKS-Arc extension.')
-param kubernetesVersion string = '1.29.4'
+@description('Kubernetes version supported by the ALDO stamp AKS-Arc extension. Discover with: az aksarc get-versions -l Autonomous')
+param kubernetesVersion string = '1.30.6'
+
+@description('SSH public key for the AKS-Arc cluster control plane nodes and node pools.')
+param clusterSshPublicKey string
 
 @description('System nodepool VM size.')
 param systemVmSize string = 'Standard_A4_v2'
@@ -83,7 +86,11 @@ resource provisionedCluster 'Microsoft.HybridContainerService/provisionedCluster
     }
     linuxProfile: {
       ssh: {
-        publicKeys: []
+        publicKeys: [
+          {
+            keyData: clusterSshPublicKey
+          }
+        ]
       }
     }
     networkProfile: {

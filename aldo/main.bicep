@@ -101,6 +101,8 @@ module aks 'modules/aks-arc.bicep' = {
     customLocationId: customLocationId
     logicalNetworkName: logicalNetworkName
     logicalNetworkResourceGroup: logicalNetworkResourceGroup
+    clusterSshPublicKey: vaultAdminSshPublicKey
+    kubernetesVersion: kubernetesVersion
   }
 }
 

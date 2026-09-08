@@ -24,6 +24,12 @@ param jumpboxAdminPassword = readEnvironmentVariable('ALDO_JUMPBOX_PASSWORD', 'C
 
 param sovereignAcrName = 'acxhtxacraguuve6o'
 
+// AKS-Arc Kubernetes version. Discover supported versions from your ALDO stamp:
+//   az aksarc get-versions -l Autonomous -o table
+// or (Az PowerShell):
+//   Invoke-AzRestMethod -Method GET -Path "/subscriptions/$sub/providers/Microsoft.HybridContainerService/locations/Autonomous/kubernetesVersions?api-version=2024-01-01"
+param kubernetesVersion = readEnvironmentVariable('ALDO_K8S_VERSION', '1.30.6')
+
 // Microsoft Entra IDs used by the Foundry Arc extension's JWT auth.
 // tenantId defaults to the subscription's tenant. clientId must be a new
 // App Registration in that tenant (see aldo/README.md for how to create it).

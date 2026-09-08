@@ -65,7 +65,7 @@ resource arcMachine 'Microsoft.HybridCompute/machines@2024-07-10' = {
   name: vmName
   location: location
   tags: tags
-  kind: 'AzureStackHCI'
+  kind: 'HCI'
   identity: {
     type: 'SystemAssigned'
   }
