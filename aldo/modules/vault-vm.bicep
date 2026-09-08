@@ -1,4 +1,4 @@
-// Ubuntu 22.04 VM running HashiCorp Vault as the sovereign local key vault.
+// Ubuntu 24.04 VM running HashiCorp Vault as the sovereign local key vault.
 // Holds the on-prem mirror of htx-kek. Serves KMS to Arc-AKS etcd encryption,
 // KV Secrets Store CSI to workload pods, and model-signing keys for the mirror.
 
@@ -20,7 +20,7 @@ param logicalNetworkName string
 @description('Resource group containing the logical network.')
 param logicalNetworkResourceGroup string
 
-@description('Gallery image resource ID for Ubuntu 22.04.')
+@description('Gallery image resource ID for Ubuntu 24.04.')
 param ubuntuGalleryImageId string
 
 @description('Admin username for the VM.')

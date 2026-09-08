@@ -1,20 +1,26 @@
 using 'main.bicep'
 
+// Concrete values from the Tokyo-WKLD stamp discovery on 2026-09-08.
+
 param location = 'Autonomous'
 param resourceGroupName = 'ACX-HTX-ALDO'
 param namePrefix = 'htxaldo'
 
-// ---- REQUIRED ONCE ALDO IS READY ----
-param customLocationId = readEnvironmentVariable('ALDO_CUSTOM_LOCATION_ID', '/subscriptions/<sub>/resourceGroups/<hci-rg>/providers/Microsoft.ExtendedLocation/customLocations/<cl-name>')
-param logicalNetworkName = readEnvironmentVariable('ALDO_LOGICAL_NETWORK_NAME', '<logical-network-name>')
-param logicalNetworkResourceGroup = readEnvironmentVariable('ALDO_LOGICAL_NETWORK_RG', 'ACX-HTX-ALDO')
-param ubuntuGalleryImageId = readEnvironmentVariable('ALDO_UBUNTU_IMAGE_ID', '/subscriptions/<sub>/resourceGroups/<gallery-rg>/providers/Microsoft.AzureStackHCI/galleryImages/ubuntu-2204-lts')
-param windowsGalleryImageId = readEnvironmentVariable('ALDO_WINDOWS_IMAGE_ID', '')
+// ---- ALDO stamp IDs ----
+param customLocationId = '/subscriptions/ef23bab2-5bd7-afa3-3013-d5116a941684/resourceGroups/tokyo-wkld/providers/Microsoft.ExtendedLocation/customLocations/Tokyo-WKLD'
+param logicalNetworkName = 'Tokyo-VLAN-101'
+param logicalNetworkResourceGroup = 'Tokyo-WKLD'
+param ubuntuGalleryImageId = '/subscriptions/ef23bab2-5bd7-afa3-3013-d5116a941684/resourceGroups/Tokyo-WKLD/providers/microsoft.azurestackhci/galleryimages/Ubuntu2404'
+param windowsGalleryImageId = '/subscriptions/ef23bab2-5bd7-afa3-3013-d5116a941684/resourceGroups/Tokyo-WKLD/providers/microsoft.azurestackhci/galleryimages/WS2025'
 
-param vaultAdminSshPublicKey = readEnvironmentVariable('ALDO_VAULT_SSH_PUBKEY', 'ssh-ed25519 AAAA... htxadmin@bootstrap')
+// SSH public key for the Vault VM admin.
+// Private key is retained in the session workspace (not committed).
+param vaultAdminSshPublicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBx6XGJhkvQ1P6kx9MixBCJ16YyhJ4NKTAVKCorLcGJB htxadmin@aldo-vault'
 param vaultAdminUsername = 'htxadmin'
-param jumpboxAdminPassword = readEnvironmentVariable('ALDO_JUMPBOX_PASSWORD', 'ChangeMe!')
+
+// Jumpbox opt-in
 param deployJumpbox = false
+param jumpboxAdminPassword = readEnvironmentVariable('ALDO_JUMPBOX_PASSWORD', 'ChangeMe!Set-Via-Env-2026')
 
 param sovereignAcrName = 'acxhtxacraguuve6o'
 

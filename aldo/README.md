@@ -73,22 +73,28 @@ Before running the Bicep, gather these and populate `main.bicepparam` (or export
 
 **Region:** ALDO stamps always use the special `Autonomous` region name. This is the ARM location value for both the RG and all resources.
 
-```powershell
-$env:ALDO_CUSTOM_LOCATION_ID  = '<from Get-AzCustomLocation>'
-$env:ALDO_LOGICAL_NETWORK_NAME = '<name>'
-$env:ALDO_LOGICAL_NETWORK_RG   = 'ACX-HTX-ALDO'
-$env:ALDO_UBUNTU_IMAGE_ID      = '<Ubuntu 22.04 gallery image id>'
-$env:ALDO_WINDOWS_IMAGE_ID     = '<Windows 2025 gallery image id>'
-$env:ALDO_VAULT_SSH_PUBKEY     = Get-Content ~/.ssh/htx-vault.pub -Raw
+**Subscription context:** ALDO ARM lives on the stamp's own Autonomous ARM plane — separate from public Azure Cloud. Run the deploy from a workstation that is signed into the Autonomous subscription (`ef23bab2-5bd7-afa3-3013-d5116a941684` for Tokyo-WKLD).
 
-# What-if
-New-AzSubscriptionDeployment `
-  -Location 'Autonomous' `
-  -TemplateFile 'aldo/main.bicep' `
-  -TemplateParameterFile 'aldo/main.bicepparam' `
-  -WhatIf
+Concrete stamp IDs are pinned in `main.bicepparam`. To deploy:
+
+```powershell
+# From a workstation signed into the Autonomous ARM plane
+Connect-AzAccount -Environment AzureCloud   # or the appropriate cloud entry for ALDO
+Set-AzContext -Subscription 'ef23bab2-5bd7-afa3-3013-d5116a941684'
+
+# Preview
+./aldo/scripts/deploy.ps1 -WhatIf
 
 # Deploy
+./aldo/scripts/deploy.ps1
+
+# With jumpbox
+./aldo/scripts/deploy.ps1 -DeployJumpbox
+```
+
+If you prefer raw `New-AzSubscriptionDeployment`:
+
+```powershell
 New-AzSubscriptionDeployment `
   -Location 'Autonomous' `
   -TemplateFile 'aldo/main.bicep' `
