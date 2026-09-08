@@ -168,3 +168,4 @@ output projectName string = project.name
 output hubId string = hub.id
 output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
+output foundryKeyVaultName string = fdyKv.name

@@ -36,6 +36,9 @@ param deployCmkVm bool = true
 @description('Deploy the AI Foundry hub + project + CMK-encrypted ACR (model registry).')
 param deployFoundry bool = true
 
+@description('Object ID of the ACX_HTX_Contributor Entra security group. Baked in from az ad group create output on 2026-09-08.')
+param contributorGroupObjectId string = 'e09d9488-62b2-4ca2-a4a2-232348662665'
+
 @description('Tags applied to the resource group and every resource.')
 param tags object = {
   Project: 'HTX'
@@ -124,6 +127,16 @@ module foundry 'modules/foundry.bicep' = if (deployFoundry) {
     tags: tags
     kekUriWithVersion: keyvault.outputs.kekUriWithVersion
     keyVaultName: keyvault.outputs.keyVaultName
+  }
+}
+
+module contributorRbac 'modules/contributor-rbac.bicep' = if (deployFoundry) {
+  scope: rg
+  name: 'contributor-rbac-deploy'
+  params: {
+    contributorGroupObjectId: contributorGroupObjectId
+    sovereignKeyVaultName: keyvault.outputs.keyVaultName
+    foundryKeyVaultName: foundry!.outputs.foundryKeyVaultName
   }
 }
 
