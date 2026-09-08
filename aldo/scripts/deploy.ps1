@@ -25,16 +25,30 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
 # --- Ensure Bicep is on PATH ---
-# winget installs Bicep to %LOCALAPPDATA%\Microsoft\WinGet\Packages\Microsoft.Bicep_*\
-# but often does not update PATH until a new shell is opened. Add it here.
-$bicepCandidate = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter 'bicep.exe' -Recurse -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+# The Microsoft.Bicep winget installer is a Windows EXE that drops bicep.exe under
+# %LOCALAPPDATA%\Programs\Bicep CLI\ (or system-wide under %ProgramFiles%\Bicep CLI\).
+# It does NOT update PATH in already-open shells. Locate the binary and prepend.
+$bicepSearchPaths = @(
+    "$env:LOCALAPPDATA\Programs\Bicep CLI",
+    "$env:ProgramFiles\Bicep CLI",
+    "${env:ProgramFiles(x86)}\Bicep CLI",
+    "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+) | Where-Object { $_ -and (Test-Path $_) }
+
+$bicepCandidate = $null
+foreach ($p in $bicepSearchPaths) {
+    $found = Get-ChildItem -Path $p -Filter 'bicep.exe' -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($found) { $bicepCandidate = $found; break }
+}
+
 if ($bicepCandidate -and (-not (Get-Command bicep -ErrorAction SilentlyContinue))) {
     $env:PATH = "$($bicepCandidate.DirectoryName);$env:PATH"
     Write-Host "==> Added Bicep to PATH: $($bicepCandidate.DirectoryName)" -ForegroundColor DarkGray
 }
 if (-not (Get-Command bicep -ErrorAction SilentlyContinue)) {
-    throw "Bicep CLI not found. Install with: winget install -e --id Microsoft.Bicep  (then reopen shell, or the script will find it under LOCALAPPDATA)."
+    Write-Host "==> Searched: $($bicepSearchPaths -join '; ')" -ForegroundColor Yellow
+    throw "Bicep CLI not found. Install with: winget install -e --id Microsoft.Bicep  (or download from https://aka.ms/bicep-install)"
 }
 & bicep --version | ForEach-Object { Write-Host "==> $_" -ForegroundColor DarkGray }
 
