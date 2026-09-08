@@ -1,7 +1,8 @@
 # Deployment Status
 
-**Last deploy:** `acx-htx-foundry-rbac-20260904-2207`  
-**RG:** `ACX-HTX` in West US 2  
+**Last deploy:** `acx-htx-foundry-rbac-20260904-2207` (foundry side)
+**Last VM change:** `2026-09-08` — Trusted Launch VM deleted; AMD Confidential VM pending SEV-SNP quota (see "Pending" below)
+**RG:** `ACX-HTX` in West US 2
 **Repo:** https://github.com/mgodfre3/ACX-HTX
 
 ## Deployed and working
@@ -14,14 +15,61 @@
 | Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops |
 | User-assigned MI (storage) | `acxhtx-mi-storage` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
 | User-assigned MI (ACR) | `acxhtx-acr-mi` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
-| Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled |
-| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running, OS disk **CMK-encrypted via customer KEK**, no public IP |
+| Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled (idle — no VM currently attached) |
 | **ACR (Premium, CMK-encrypted)** | `acxhtxacraguuve6o` | ✅ Encryption enabled, key `htx-kek`, model registry |
 | **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to storage + KV + ACR + AppInsights |
 | **Foundry project** | `acxhtx-foundry-proj` | ✅ Kind=Project, child of hub |
 | Foundry associated KV | `acxhtx-fdy-kv-aguuve` | ✅ RBAC-authorized (Foundry uses role assignments, not access policies) |
 | Foundry associated storage | `acxhtxfdystgaguuve6o` | ✅ StorageV2 |
 | Foundry App Insights | `acxhtx-fdy-ai-aguuve` | ✅ Web kind |
+
+## Pending — AMD Confidential VM (SEV-SNP)
+
+**Requested:** AMD Confidential Compute VM on the existing peered VNet with private-endpoint connectivity.
+**Blocker:** SEV-SNP quota = 0 in `westus2` for this subscription.
+
+Discovery (2026-09-08):
+- westus2 offers **only v6** AMD SEV-SNP families: `standardDCasv6Family`, `standardDCadsv6Family`, `standardECasv6Family`, `standardECadsv6Family` (v5 families are quota-provisioned but the SKUs are not listed in this region — the earlier "DCadsv5 quota 0/100" reading was misleading).
+- All four v6 families currently have `limit = 0` vCPUs.
+- Programmatic quota request via `Microsoft.Quota` REST (`PATCH /quotas/standardECasv6Family = 8`) auto-failed with `QuotaNotAvailableForResource` — needs manual review via a support case.
+
+Current staged state:
+- Bicep code (`infra/modules/cvm.bicep`) targets `Standard_EC2as_v6` (2 vCPU / 16 GB / AMD SEV-SNP / Windows Server 2022) on the existing `AC-Managment-WUS2 / Default` subnet, dynamic private IP only, `securityEncryptionType: 'DiskWithVMGuestState'` OS disk.
+- `infra/main.bicepparam` has `deployCvm = true`, `deployCmkVm = false`. Once quota lands, re-running the deploy will provision the CVM in one shot; no other resources need to change.
+- The previous Trusted Launch VM `acxhtx-vm` and its NIC/OS disk have been deleted. Private endpoints, KV, Storage, DES, ACR, and Foundry are untouched.
+
+### Next step — file the quota case
+
+Portal path: **Subscription → Usage + quotas → Request quota increase → Compute-VM (cores) → West US 2 → `Standard ECasv6 Family vCPUs` → set to 8**.
+
+Or CLI (creates a support ticket if the account has a support plan):
+
+```powershell
+az support tickets create `
+  --ticket-name "cvm-quota-standardECasv6Family-westus2" `
+  --title "SEV-SNP quota increase: standardECasv6Family = 8 vCPU in westus2" `
+  --description "Please raise quota for standardECasv6Family from 0 to 8 vCPUs in westus2. Auto-request (Microsoft.Quota REST PATCH) returned QuotaNotAvailableForResource. Subscription: AdaptiveCloudLab (fbaf508b-cb61-4383-9cda-a42bfa0c7bc9). Use case: AMD Confidential VM for sovereign-hybrid demo on peered VNet AC-Managment-WUS2." `
+  --severity moderate `
+  --contact-first-name Michael --contact-last-name Godfrey `
+  --contact-method email --contact-email Michael.Godfrey@adaptivecloudlab.com `
+  --contact-country USA --contact-language en-us --contact-timezone "Pacific Standard Time"
+```
+
+Once approved, deploy:
+
+```powershell
+$env:CVM_ADMIN_PASSWORD = '<strong-password>'
+az deployment sub create `
+  --location westus2 `
+  --template-file infra/main.bicep `
+  --parameters infra/main.bicepparam `
+  --name "acx-htx-cvm-$(Get-Date -Format yyyyMMdd-HHmm)"
+```
+
+### Known follow-up: CMK on the CVM OS disk
+
+`cvm.bicep` currently uses `securityEncryptionType: 'DiskWithVMGuestState'` (platform-managed key for the guest-state blob, platform key for the OS disk). To get the "revoke KEK → CVM disk unreadable" behavior the demo advertises, upgrade to `DiskWithVMGuestStateCMK` backed by a **Confidential** Disk Encryption Set (`encryptionType: 'ConfidentialVmEncryptedWithCustomerKey'`) against a KEK that has a Secure Key Release (SKR) policy attached. `htx-kek` does not currently have an SKR policy, so this needs a KEK rotation planned alongside the demo cutover.
+
 
 ## Key custody proof (three levels, one key)
 

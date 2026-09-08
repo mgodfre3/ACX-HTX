@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "12770799548399189767"
+      "templateHash": "14916477391912332434"
     }
   },
   "parameters": {
@@ -661,7 +661,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "4184842840553228757"
+              "templateHash": "11788881161278470087"
             }
           },
           "parameters": {
@@ -703,9 +703,9 @@
             },
             "vmSize": {
               "type": "string",
-              "defaultValue": "Standard_EC2as_v5",
+              "defaultValue": "Standard_EC2as_v6",
               "metadata": {
-                "description": "Confidential VM size (AMD SEV-SNP)."
+                "description": "Confidential VM size (AMD SEV-SNP). westus2 only offers v6 (DCasv6/DCadsv6/ECasv6/ECadsv6); v5 SKUs are not listed in this region."
               }
             }
           },
