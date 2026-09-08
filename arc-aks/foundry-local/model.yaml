@@ -1,0 +1,87 @@
+# Foundry Local ModelDeployment for the HTX cell-antenna detector +
+# a general-purpose Phi-4 mini instance for on-prem AI Q&A.
+#
+# The Microsoft.Foundry Arc extension creates the operator + CRDs in
+# namespace foundry-local-operator. CRs must live in that namespace because
+# the operator's model-cache Job references ConfigMap
+# foundry-otel-sidecar-config by name.
+#
+# This file follows the same pattern as the MWC26 demo:
+#   github.com/mgodfre3/adaptivecloudlab-mwc26-demo/gitops/apps/base/foundry-local/model.yaml
+---
+apiVersion: foundrylocal.azure.com/v1
+kind: ModelDeployment
+metadata:
+  name: phi-4-deployment
+  namespace: foundry-local-operator
+  labels:
+    demo: htx-sovereign
+    workload: general-inference
+spec:
+  model:
+    catalog:
+      name: phi-4-mini          # resolved from foundry-local-catalog ConfigMap
+  compute: gpu
+  workloadType: generative
+  runtime: onnx-genai
+  replicas: 1
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "3Gi"
+      gpu: 1                    # bare `gpu`, NOT `nvidia.com/gpu`
+---
+# HTX cell-antenna detector - YOLOv8 fine-tune published from the sovereign
+# CMK-encrypted ACR (acxhtxacraguuve6o.azurecr.io/models/htx-antenna-detector).
+# Uses model.registry (BYO OCI source) instead of catalog because it is not
+# a built-in Foundry catalog entry.
+apiVersion: foundrylocal.azure.com/v1
+kind: StoreModel
+metadata:
+  name: htx-antenna-detector
+  namespace: foundry-local-operator
+spec:
+  # ACR Connected Registry mirror local address (installed post-deploy).
+  # In production this would be tls-terminated; demo uses the mirror's cleartext
+  # in-cluster endpoint on port 5000.
+  ociUri: aldo-tokyo-wkld.local:5000/models/htx-antenna-detector:v1
+  format: onnx
+---
+apiVersion: foundrylocal.azure.com/v1
+kind: Model
+metadata:
+  name: htx-antenna-detector
+  namespace: foundry-local-operator
+spec:
+  storeRef:
+    name: htx-antenna-detector
+  runtime: onnxruntime-gpu
+  workloadType: predictive
+---
+apiVersion: foundrylocal.azure.com/v1
+kind: ModelDeployment
+metadata:
+  name: htx-antenna-detector-deployment
+  namespace: foundry-local-operator
+  labels:
+    demo: htx-sovereign
+    workload: antenna-detector
+spec:
+  model:
+    ref:
+      name: htx-antenna-detector
+  compute: gpu
+  workloadType: predictive
+  runtime: onnxruntime-gpu
+  replicas: 1
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+      gpu: 1

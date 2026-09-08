@@ -56,6 +56,12 @@ param jumpboxAdminPassword string = ''
 @description('Azure ACR to sync from for the Connected Registry mirror.')
 param sovereignAcrName string = 'acxhtxacraguuve6o'
 
+@description('Microsoft Entra tenant ID. Used by Microsoft.Foundry extension for JWT auth.')
+param entraTenantId string = subscription().tenantId
+
+@description('Microsoft Entra client (application) ID authorized to call Foundry endpoints. Create via App Registration in the customer tenant.')
+param entraClientId string
+
 @description('Tags applied to every resource.')
 param tags object = {
   Project: 'HTX'
@@ -103,6 +109,8 @@ module aksExtensions 'modules/aks-extensions.bicep' = {
   name: 'aks-ext-deploy'
   params: {
     aksArcClusterName: aks.outputs.connectedClusterName
+    entraTenantId: entraTenantId
+    entraClientId: entraClientId
   }
 }
 
@@ -124,6 +132,6 @@ module jumpbox 'modules/jumpbox-vm.bicep' = if (deployJumpbox) {
 
 output resourceGroupName string = rg.name
 output vaultVmName string = vault.outputs.vmName
-output vaultVmPrivateIp string = vault.outputs.privateIpAddress
+output vaultArcMachineId string = vault.outputs.arcMachineId
 output aksArcClusterName string = aks.outputs.connectedClusterName
 output connectedRegistryInstallHint string = 'Run: az acr connected-registry install info --registry ${sovereignAcrName} --name aldo-tokyo-wkld'

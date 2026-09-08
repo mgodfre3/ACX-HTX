@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "5832428236172632559"
+      "templateHash": "2660794151319390634"
     }
   },
   "parameters": {
@@ -98,6 +98,19 @@
         "description": "Azure ACR to sync from for the Connected Registry mirror."
       }
     },
+    "entraTenantId": {
+      "type": "string",
+      "defaultValue": "[subscription().tenantId]",
+      "metadata": {
+        "description": "Microsoft Entra tenant ID. Used by Microsoft.Foundry extension for JWT auth."
+      }
+    },
+    "entraClientId": {
+      "type": "string",
+      "metadata": {
+        "description": "Microsoft Entra client (application) ID authorized to call Foundry endpoints. Create via App Registration in the customer tenant."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -164,14 +177,14 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "17797313283274123590"
+              "templateHash": "2522404528029159806"
             }
           },
           "parameters": {
             "location": {
               "type": "string",
               "metadata": {
-                "description": "Azure region ARM metadata."
+                "description": "Azure region ARM metadata. ALDO stamps use Autonomous."
               }
             },
             "namePrefix": {
@@ -222,11 +235,18 @@
                 "description": "SSH public key for the admin user."
               }
             },
-            "vmSize": {
-              "type": "string",
-              "defaultValue": "Standard_A4_v2",
+            "processorCount": {
+              "type": "int",
+              "defaultValue": 4,
               "metadata": {
-                "description": "VM size class (Azure Local sizing)."
+                "description": "vCPU count (Azure Local sizes VMs by memoryMB + processors, not vmSize)."
+              }
+            },
+            "memoryMB": {
+              "type": "int",
+              "defaultValue": 8192,
+              "metadata": {
+                "description": "Memory in MB."
               }
             }
           },
@@ -236,20 +256,8 @@
           },
           "resources": [
             {
-              "type": "Microsoft.HybridCompute/machines",
-              "apiVersion": "2024-07-10",
-              "name": "[variables('vmName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "kind": "AzureStackHCI",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {}
-            },
-            {
               "type": "Microsoft.AzureStackHCI/networkInterfaces",
-              "apiVersion": "2024-01-01",
+              "apiVersion": "2025-02-01-preview",
               "name": "[variables('nicName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -271,8 +279,20 @@
               }
             },
             {
+              "type": "Microsoft.HybridCompute/machines",
+              "apiVersion": "2024-07-10",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "AzureStackHCI",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {}
+            },
+            {
               "type": "Microsoft.AzureStackHCI/virtualMachineInstances",
-              "apiVersion": "2024-01-01",
+              "apiVersion": "2025-02-01-preview",
               "scope": "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
               "name": "default",
               "extendedLocation": {
@@ -281,13 +301,16 @@
               },
               "properties": {
                 "hardwareProfile": {
-                  "vmSize": "[parameters('vmSize')]"
+                  "processors": "[parameters('processorCount')]",
+                  "memoryMB": "[parameters('memoryMB')]"
                 },
                 "osProfile": {
                   "adminUsername": "[parameters('adminUsername')]",
                   "computerName": "htxvault",
                   "linuxConfiguration": {
                     "disablePasswordAuthentication": true,
+                    "provisionVMAgent": true,
+                    "provisionVMConfigAgent": true,
                     "ssh": {
                       "publicKeys": [
                         {
@@ -295,8 +318,7 @@
                           "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]"
                         }
                       ]
-                    },
-                    "provisionVMAgent": true
+                    }
                   }
                 },
                 "storageProfile": {
@@ -328,10 +350,6 @@
             "vmName": {
               "type": "string",
               "value": "[variables('vmName')]"
-            },
-            "privateIpAddress": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName')), '2024-01-01').ipConfigurations[0].properties.privateIPAddress]"
             },
             "arcMachineId": {
               "type": "string",
@@ -621,6 +639,12 @@
         "parameters": {
           "aksArcClusterName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'aks-arc-deploy'), '2025-04-01').outputs.connectedClusterName.value]"
+          },
+          "entraTenantId": {
+            "value": "[parameters('entraTenantId')]"
+          },
+          "entraClientId": {
+            "value": "[parameters('entraClientId')]"
           }
         },
         "template": {
@@ -630,21 +654,49 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "394394636739048642"
+              "templateHash": "15118033026164881035"
             }
           },
           "parameters": {
             "aksArcClusterName": {
               "type": "string",
               "metadata": {
-                "description": "AKS-Arc cluster name."
+                "description": "AKS-Arc cluster name (Microsoft.Kubernetes/connectedClusters)."
+              }
+            },
+            "entraTenantId": {
+              "type": "string",
+              "metadata": {
+                "description": "Microsoft Entra tenant ID (for Foundry extension EntraAuth)."
+              }
+            },
+            "entraClientId": {
+              "type": "string",
+              "metadata": {
+                "description": "Microsoft Entra client (application) ID authorized to call Foundry endpoints."
               }
             }
           },
           "resources": [
             {
               "type": "Microsoft.KubernetesConfiguration/extensions",
-              "apiVersion": "2024-04-01-preview",
+              "apiVersion": "2024-11-01",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "azure-cert-manager",
+              "properties": {
+                "extensionType": "Microsoft.CertManagement",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "Stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "cert-manager"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-11-01",
               "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
               "name": "nvidia-gpu-operator",
               "properties": {
@@ -660,7 +712,7 @@
             },
             {
               "type": "Microsoft.KubernetesConfiguration/extensions",
-              "apiVersion": "2024-04-01-preview",
+              "apiVersion": "2024-11-01",
               "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
               "name": "azure-keyvault-secrets-provider",
               "properties": {
@@ -680,7 +732,7 @@
             },
             {
               "type": "Microsoft.KubernetesConfiguration/extensions",
-              "apiVersion": "2024-04-01-preview",
+              "apiVersion": "2024-11-01",
               "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
               "name": "azuremonitor-containers",
               "properties": {
@@ -696,7 +748,31 @@
             },
             {
               "type": "Microsoft.KubernetesConfiguration/extensions",
-              "apiVersion": "2024-04-01-preview",
+              "apiVersion": "2024-11-01",
+              "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
+              "name": "inference-operator",
+              "properties": {
+                "extensionType": "Microsoft.Foundry",
+                "autoUpgradeMinorVersion": true,
+                "releaseTrain": "stable",
+                "scope": {
+                  "cluster": {
+                    "releaseNamespace": "foundry-local-operator"
+                  }
+                },
+                "configurationSettings": {
+                  "entraAuth.tenantId": "[parameters('entraTenantId')]",
+                  "entraAuth.clientId": "[parameters('entraClientId')]"
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'azure-cert-manager')]",
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'nvidia-gpu-operator')]"
+              ]
+            },
+            {
+              "type": "Microsoft.KubernetesConfiguration/extensions",
+              "apiVersion": "2024-11-01",
               "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
               "name": "flux",
               "properties": {
@@ -715,12 +791,12 @@
             },
             {
               "type": "Microsoft.KubernetesConfiguration/fluxConfigurations",
-              "apiVersion": "2024-04-01-preview",
+              "apiVersion": "2024-11-01",
               "scope": "[resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName'))]",
               "name": "htx-workloads",
               "properties": {
                 "scope": "cluster",
-                "namespace": "htx-foundry-local",
+                "namespace": "foundry-local-operator",
                 "sourceKind": "GitRepository",
                 "gitRepository": {
                   "url": "https://github.com/mgodfre3/ACX-HTX",
@@ -732,7 +808,7 @@
                 },
                 "kustomizations": {
                   "foundryLocal": {
-                    "path": "./arc-aks",
+                    "path": "./arc-aks/foundry-local",
                     "dependsOn": [],
                     "timeoutInSeconds": 600,
                     "syncIntervalInSeconds": 300,
@@ -743,7 +819,8 @@
                 }
               },
               "dependsOn": [
-                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'flux')]"
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'flux')]",
+                "[extensionResourceId(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('aksArcClusterName')), 'Microsoft.KubernetesConfiguration/extensions', 'inference-operator')]"
               ]
             }
           ],
@@ -751,9 +828,11 @@
             "extensionNames": {
               "type": "array",
               "value": [
+                "azure-cert-manager",
                 "nvidia-gpu-operator",
                 "azure-keyvault-secrets-provider",
                 "azuremonitor-containers",
+                "inference-operator",
                 "flux"
               ]
             },
@@ -816,7 +895,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7294481403454292729"
+              "templateHash": "7133228880948478636"
             }
           },
           "parameters": {
@@ -874,11 +953,18 @@
                 "description": "Local admin password."
               }
             },
-            "vmSize": {
-              "type": "string",
-              "defaultValue": "Standard_A4_v2",
+            "processorCount": {
+              "type": "int",
+              "defaultValue": 4,
               "metadata": {
-                "description": "VM size."
+                "description": "vCPU count."
+              }
+            },
+            "memoryMB": {
+              "type": "int",
+              "defaultValue": 8192,
+              "metadata": {
+                "description": "Memory in MB."
               }
             }
           },
@@ -888,20 +974,8 @@
           },
           "resources": [
             {
-              "type": "Microsoft.HybridCompute/machines",
-              "apiVersion": "2024-07-10",
-              "name": "[variables('vmName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "kind": "AzureStackHCI",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {}
-            },
-            {
               "type": "Microsoft.AzureStackHCI/networkInterfaces",
-              "apiVersion": "2024-01-01",
+              "apiVersion": "2025-02-01-preview",
               "name": "[variables('nicName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -923,8 +997,20 @@
               }
             },
             {
+              "type": "Microsoft.HybridCompute/machines",
+              "apiVersion": "2024-07-10",
+              "name": "[variables('vmName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "AzureStackHCI",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {}
+            },
+            {
               "type": "Microsoft.AzureStackHCI/virtualMachineInstances",
-              "apiVersion": "2024-01-01",
+              "apiVersion": "2025-02-01-preview",
               "scope": "[resourceId('Microsoft.HybridCompute/machines', variables('vmName'))]",
               "name": "default",
               "extendedLocation": {
@@ -933,7 +1019,8 @@
               },
               "properties": {
                 "hardwareProfile": {
-                  "vmSize": "[parameters('vmSize')]"
+                  "processors": "[parameters('processorCount')]",
+                  "memoryMB": "[parameters('memoryMB')]"
                 },
                 "osProfile": {
                   "adminUsername": "[parameters('adminUsername')]",
@@ -941,6 +1028,7 @@
                   "computerName": "htxjumpbox",
                   "windowsConfiguration": {
                     "provisionVMAgent": true,
+                    "provisionVMConfigAgent": true,
                     "enableAutomaticUpdates": true
                   }
                 },
@@ -973,10 +1061,6 @@
             "vmName": {
               "type": "string",
               "value": "[variables('vmName')]"
-            },
-            "privateIpAddress": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.AzureStackHCI/networkInterfaces', variables('nicName')), '2024-01-01').ipConfigurations[0].properties.privateIPAddress]"
             }
           }
         }
@@ -995,9 +1079,9 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vault-deploy'), '2025-04-01').outputs.vmName.value]"
     },
-    "vaultVmPrivateIp": {
+    "vaultArcMachineId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vault-deploy'), '2025-04-01').outputs.privateIpAddress.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'vault-deploy'), '2025-04-01').outputs.arcMachineId.value]"
     },
     "aksArcClusterName": {
       "type": "string",

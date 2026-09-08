@@ -1,8 +1,8 @@
 // Ubuntu 24.04 VM running HashiCorp Vault as the sovereign local key vault.
-// Holds the on-prem mirror of htx-kek. Serves KMS to Arc-AKS etcd encryption,
-// KV Secrets Store CSI to workload pods, and model-signing keys for the mirror.
+// Uses Microsoft.AzureStackHCI/virtualMachineInstances - Azure Local schema, NOT Azure schema.
+// Reference: https://learn.microsoft.com/en-us/azure/templates/microsoft.azurestackhci/virtualmachineinstances
 
-@description('Azure region ARM metadata.')
+@description('Azure region ARM metadata. ALDO stamps use Autonomous.')
 param location string
 
 @description('Short name prefix.')
@@ -29,28 +29,16 @@ param adminUsername string
 @description('SSH public key for the admin user.')
 param adminSshPublicKey string
 
-@description('VM size class (Azure Local sizing).')
-param vmSize string = 'Standard_A4_v2'
+@description('vCPU count (Azure Local sizes VMs by memoryMB + processors, not vmSize).')
+param processorCount int = 4
+
+@description('Memory in MB.')
+param memoryMB int = 8192
 
 var vmName = '${namePrefix}-vault'
 var nicName = '${vmName}-nic'
 
-// NOTE: Azure Local VirtualMachineInstance doesn't expose userData/customData
-// in the current ARM surface for Linux. Vault installation is done post-boot
-// by SSH'ing in and running aldo/scripts/init-vault.sh - documented in aldo/README.md.
-
-resource arcMachine 'Microsoft.HybridCompute/machines@2024-07-10' = {
-  name: vmName
-  location: location
-  tags: tags
-  kind: 'AzureStackHCI'
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {}
-}
-
-resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2024-01-01' = {
+resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2025-02-01-preview' = {
   name: nicName
   location: location
   tags: tags
@@ -72,7 +60,20 @@ resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2024-01-01' = {
   }
 }
 
-resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01' = {
+// Arc-projected machine (host of the VM instance)
+resource arcMachine 'Microsoft.HybridCompute/machines@2024-07-10' = {
+  name: vmName
+  location: location
+  tags: tags
+  kind: 'AzureStackHCI'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {}
+}
+
+// The VM instance itself - Azure Local schema
+resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2025-02-01-preview' = {
   scope: arcMachine
   name: 'default'
   extendedLocation: {
@@ -81,13 +82,16 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
   }
   properties: {
     hardwareProfile: {
-      vmSize: vmSize
+      processors: processorCount
+      memoryMB: memoryMB
     }
     osProfile: {
       adminUsername: adminUsername
       computerName: 'htxvault'
       linuxConfiguration: {
         disablePasswordAuthentication: true
+        provisionVMAgent: true
+        provisionVMConfigAgent: true
         ssh: {
           publicKeys: [
             {
@@ -96,7 +100,6 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
             }
           ]
         }
-        provisionVMAgent: true
       }
     }
     storageProfile: {
@@ -121,6 +124,5 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
 }
 
 output vmName string = arcMachine.name
-output privateIpAddress string = nic.properties.ipConfigurations[0].properties.privateIPAddress
 output arcMachineId string = arcMachine.id
 output arcMachinePrincipalId string = arcMachine.identity.principalId

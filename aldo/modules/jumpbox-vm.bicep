@@ -1,4 +1,5 @@
 // Optional Windows Server 2025 jumpbox on the ALDO stamp.
+// Uses Microsoft.AzureStackHCI/virtualMachineInstances - Azure Local schema.
 
 @description('Azure region ARM metadata.')
 param location string
@@ -28,24 +29,16 @@ param adminUsername string
 @description('Local admin password.')
 param adminPassword string
 
-@description('VM size.')
-param vmSize string = 'Standard_A4_v2'
+@description('vCPU count.')
+param processorCount int = 4
+
+@description('Memory in MB.')
+param memoryMB int = 8192
 
 var vmName = '${namePrefix}-jumpbox'
 var nicName = '${vmName}-nic'
 
-resource arcMachine 'Microsoft.HybridCompute/machines@2024-07-10' = {
-  name: vmName
-  location: location
-  tags: tags
-  kind: 'AzureStackHCI'
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {}
-}
-
-resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2024-01-01' = {
+resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2025-02-01-preview' = {
   name: nicName
   location: location
   tags: tags
@@ -67,7 +60,18 @@ resource nic 'Microsoft.AzureStackHCI/networkInterfaces@2024-01-01' = {
   }
 }
 
-resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01' = {
+resource arcMachine 'Microsoft.HybridCompute/machines@2024-07-10' = {
+  name: vmName
+  location: location
+  tags: tags
+  kind: 'AzureStackHCI'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {}
+}
+
+resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2025-02-01-preview' = {
   scope: arcMachine
   name: 'default'
   extendedLocation: {
@@ -76,7 +80,8 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
   }
   properties: {
     hardwareProfile: {
-      vmSize: vmSize
+      processors: processorCount
+      memoryMB: memoryMB
     }
     osProfile: {
       adminUsername: adminUsername
@@ -84,6 +89,7 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
       computerName: 'htxjumpbox'
       windowsConfiguration: {
         provisionVMAgent: true
+        provisionVMConfigAgent: true
         enableAutomaticUpdates: true
       }
     }
@@ -109,4 +115,3 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
 }
 
 output vmName string = arcMachine.name
-output privateIpAddress string = nic.properties.ipConfigurations[0].properties.privateIPAddress

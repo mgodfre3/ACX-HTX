@@ -24,6 +24,12 @@ param jumpboxAdminPassword = readEnvironmentVariable('ALDO_JUMPBOX_PASSWORD', 'C
 
 param sovereignAcrName = 'acxhtxacraguuve6o'
 
+// Microsoft Entra IDs used by the Foundry Arc extension's JWT auth.
+// tenantId defaults to the subscription's tenant. clientId must be a new
+// App Registration in that tenant (see aldo/README.md for how to create it).
+param entraTenantId = '98b8267d-e97f-426e-8b3f-7956511fd63f'
+param entraClientId = readEnvironmentVariable('ALDO_FOUNDRY_ENTRA_CLIENT_ID', '<create-app-registration-and-set-env-var>')
+
 param tags = {
   Project: 'HTX'
   'Created By': 'Michael Godfrey'
