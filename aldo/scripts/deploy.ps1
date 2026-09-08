@@ -18,6 +18,7 @@ param(
     [string]$Location = 'Autonomous',
     [string]$SubscriptionId = 'ef23bab2-5bd7-afa3-3013-d5116a941684',
     [switch]$WhatIf,
+    [switch]$Validate,
     [switch]$DeployJumpbox
 )
 
@@ -77,7 +78,26 @@ $deploymentArgs = @{
 
 if ($WhatIf) {
     Write-Host "==> Running What-If against '$Location'..." -ForegroundColor Cyan
-    Get-AzSubscriptionDeploymentWhatIfResult @deploymentArgs
+    Write-Host "    Note: ALDO Autonomous ARM plane may return InternalServerError for What-If" -ForegroundColor DarkYellow
+    Write-Host "    on preview resource types. If that happens, use -Validate or just deploy." -ForegroundColor DarkYellow
+    try {
+        Get-AzSubscriptionDeploymentWhatIfResult @deploymentArgs
+    } catch {
+        Write-Host ""
+        Write-Host "==> What-If failed (ALDO ARM plane limitation):" -ForegroundColor Yellow
+        Write-Host "    $($_.Exception.Message)" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "Fallback: try  .\aldo\scripts\deploy.ps1 -Validate   for static template validation" -ForegroundColor Cyan
+    }
+} elseif ($Validate) {
+    Write-Host "==> Validating template against '$Location'..." -ForegroundColor Cyan
+    $v = Test-AzSubscriptionDeployment @deploymentArgs
+    if ($v.Count -eq 0) {
+        Write-Host "==> Validation passed. No errors." -ForegroundColor Green
+    } else {
+        Write-Host "==> Validation errors:" -ForegroundColor Red
+        $v | Format-List
+    }
 } else {
     Write-Host "==> Deploying '$deploymentName' to '$Location'..." -ForegroundColor Cyan
     $r = New-AzSubscriptionDeployment @deploymentArgs
