@@ -1,7 +1,6 @@
 # Deployment Status
 
-**Last deploy:** `acx-htx-foundry-rbac-20260904-2207` (foundry side)
-**Last VM change:** `2026-09-08` — Trusted Launch VM deleted; AMD Confidential VM pending SEV-SNP quota (see "Pending" below)
+**Last deploy:** `acx-htx-tlvm-restore-20260908-1933` (Trusted Launch VM restored after CVM quota block)
 **RG:** `ACX-HTX` in West US 2
 **Repo:** https://github.com/mgodfre3/ACX-HTX
 
@@ -15,7 +14,8 @@
 | Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops |
 | User-assigned MI (storage) | `acxhtx-mi-storage` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
 | User-assigned MI (ACR) | `acxhtx-acr-mi` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
-| Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled (idle — no VM currently attached) |
+| Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled |
+| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running (private IP `10.255.250.9`), OS disk **CMK-encrypted via customer KEK**, no public IP |
 | **ACR (Premium, CMK-encrypted)** | `acxhtxacraguuve6o` | ✅ Encryption enabled, key `htx-kek`, model registry |
 | **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to storage + KV + ACR + AppInsights |
 | **Foundry project** | `acxhtx-foundry-proj` | ✅ Kind=Project, child of hub |
@@ -26,7 +26,7 @@
 ## Pending — AMD Confidential VM (SEV-SNP)
 
 **Requested:** AMD Confidential Compute VM on the existing peered VNet with private-endpoint connectivity.
-**Blocker:** SEV-SNP quota = 0 in `westus2` for this subscription.
+**Blocker:** SEV-SNP quota = 0 in `westus2` for this subscription. Reverted to Trusted Launch VM (`deployCmkVm=true`) until quota lands.
 
 Discovery (2026-09-08):
 - westus2 offers **only v6** AMD SEV-SNP families: `standardDCasv6Family`, `standardDCadsv6Family`, `standardECasv6Family`, `standardECadsv6Family` (v5 families are quota-provisioned but the SKUs are not listed in this region — the earlier "DCadsv5 quota 0/100" reading was misleading).
@@ -35,8 +35,7 @@ Discovery (2026-09-08):
 
 Current staged state:
 - Bicep code (`infra/modules/cvm.bicep`) targets `Standard_EC2as_v6` (2 vCPU / 16 GB / AMD SEV-SNP / Windows Server 2022) on the existing `AC-Managment-WUS2 / Default` subnet, dynamic private IP only, `securityEncryptionType: 'DiskWithVMGuestState'` OS disk.
-- `infra/main.bicepparam` has `deployCvm = true`, `deployCmkVm = false`. Once quota lands, re-running the deploy will provision the CVM in one shot; no other resources need to change.
-- The previous Trusted Launch VM `acxhtx-vm` and its NIC/OS disk have been deleted. Private endpoints, KV, Storage, DES, ACR, and Foundry are untouched.
+- `infra/main.bicepparam` currently runs the Trusted Launch VM (`deployCvm = false`, `deployCmkVm = true`). To cut over once quota lands: delete `acxhtx-vm` + its NIC + OS disk, flip params (`deployCvm = true`, `deployCmkVm = false`), redeploy.
 
 ### Next step — file the quota case
 
