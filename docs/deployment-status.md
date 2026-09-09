@@ -1,6 +1,6 @@
 # Deployment Status
 
-**Last deploy:** `acx-htx-tlvm-restore-20260908-1933` (Trusted Launch VM restored after CVM quota block)
+**Last deploy:** `acx-htx-producer-mi-20260909-1017` (producer UAMI + container role assignment codified in Bicep)
 **RG:** `ACX-HTX` in West US 2
 **Repo:** https://github.com/mgodfre3/ACX-HTX
 
@@ -11,9 +11,11 @@
 | Key Vault Premium (HSM-backed) | `acxhtx-kv-aguuve6oq6by6` | ✅ RBAC, firewall Deny + AzureServices bypass, private endpoint |
 | KEK (RSA-HSM 3072) | `htx-kek` | ✅ Backs storage CMK + disk CMK + ACR CMK |
 | Storage Account | `acxhtxstgaguuve6oq6by6` | ✅ CMK active, public access Disabled, private endpoint |
-| Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops |
+| Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops (consumer read side) |
+| Blob container | `sovereign-encrypted` | ✅ Producer write target — no public access, private endpoint only |
 | User-assigned MI (storage) | `acxhtx-mi-storage` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
 | User-assigned MI (ACR) | `acxhtx-acr-mi` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
+| **User-assigned MI (producer)** | `acxhtx-producer-mi` | ✅ Attached to jump host `AdaptiveCloud-Management/ACX-JSW01-WUS2`. Client ID `005f8913-6ad1-4abb-b42e-d87df65af485`. Role: **Storage Blob Data Contributor scoped to container `sovereign-encrypted` only** — cannot read `sovereign-cold` or any other container. |
 | Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled |
 | **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running (private IP `10.255.250.9`), OS disk **CMK-encrypted via customer KEK**, no public IP |
 | **ACR (Premium, CMK-encrypted)** | `acxhtxacraguuve6o` | ✅ Encryption enabled, key `htx-kek`, model registry |
@@ -68,6 +70,44 @@ az deployment sub create `
 ### Known follow-up: CMK on the CVM OS disk
 
 `cvm.bicep` currently uses `securityEncryptionType: 'DiskWithVMGuestState'` (platform-managed key for the guest-state blob, platform key for the OS disk). To get the "revoke KEK → CVM disk unreadable" behavior the demo advertises, upgrade to `DiskWithVMGuestStateCMK` backed by a **Confidential** Disk Encryption Set (`encryptionType: 'ConfidentialVmEncryptedWithCustomerKey'`) against a KEK that has a Secure Key Release (SKR) policy attached. `htx-kek` does not currently have an SKR policy, so this needs a KEK rotation planned alongside the demo cutover.
+
+
+## Producer identity (durable, for scheduled uploads)
+
+The first end-to-end producer upload was relayed through an authenticated Azure jump-host session. Repeat scheduled uploads use a dedicated user-assigned managed identity — **no secrets stored on the jump host, no SAS tokens to rotate**.
+
+| Property | Value |
+|---|---|
+| UAMI name | `acxhtx-producer-mi` |
+| Resource group | `ACX-HTX` |
+| Client ID | `005f8913-6ad1-4abb-b42e-d87df65af485` |
+| Principal ID | `2e66a41e-ea99-4882-b807-262b8709e151` |
+| Role | Storage Blob Data Contributor |
+| Scope | Container `sovereign-encrypted` **only** (not the whole storage account) |
+| Attached to | `AdaptiveCloud-Management/ACX-JSW01-WUS2` (jump host) |
+
+**Why this scope:** the producer needs write on `sovereign-encrypted`. It has no access to `sovereign-cold`, no access to the storage account control plane, and no consumer read path — so a compromise of the producer identity cannot forge cold-slice data or read anything the consumer sees.
+
+**Producer configuration on the jump host** — point `azure-identity` at this UAMI's client ID:
+
+```powershell
+# One-time on the jump host (persist for the scheduled task account)
+[Environment]::SetEnvironmentVariable(
+  'AZURE_CLIENT_ID', '005f8913-6ad1-4abb-b42e-d87df65af485', 'Machine')
+# Producer picks it up via DefaultAzureCredential / ManagedIdentityCredential:
+#   cred = DefaultAzureCredential()   # honors AZURE_CLIENT_ID for UAMI selection
+#   blob = BlobServiceClient(
+#     account_url='https://acxhtxstgaguuve6oq6by6.blob.core.windows.net',
+#     credential=cred)
+```
+
+**Codified in Bicep** — the UAMI is created in `infra/modules/identity.bicep`, and the container-scoped role assignment is in `infra/modules/storage.bicep` (both under deterministic `guid()` names — idempotent on future deploys). The jump-host attachment is out-of-band (cross-RG, VM not in the template); reproduce with:
+
+```powershell
+az vm identity assign `
+  -g AdaptiveCloud-Management -n ACX-JSW01-WUS2 `
+  --identities /subscriptions/fbaf508b-cb61-4383-9cda-a42bfa0c7bc9/resourceGroups/ACX-HTX/providers/Microsoft.ManagedIdentity/userAssignedIdentities/acxhtx-producer-mi
+```
 
 
 ## Key custody proof (three levels, one key)

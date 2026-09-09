@@ -85,6 +85,7 @@ module storage 'modules/storage.bicep' = {
     keyVaultUri: keyvault.outputs.keyVaultUri
     kekName: keyvault.outputs.kekName
     storageIdentityId: identity.outputs.storageIdentityId
+    producerIdentityPrincipalId: identity.outputs.producerIdentityPrincipalId
     workloadSubnetId: workloadSubnetId
   }
 }
@@ -145,6 +146,10 @@ output keyVaultName string = keyvault.outputs.keyVaultName
 output kekName string = keyvault.outputs.kekName
 output storageAccountName string = storage.outputs.storageAccountName
 output coldContainerName string = storage.outputs.coldContainerName
+output encryptedContainerName string = storage.outputs.encryptedContainerName
+output producerIdentityId string = identity.outputs.producerIdentityId
+output producerIdentityClientId string = identity.outputs.producerIdentityClientId
+output producerIdentityPrincipalId string = identity.outputs.producerIdentityPrincipalId
 output cvmName string = deployCvm ? cvm.outputs.cvmName : ''
 output cvmPrincipalId string = deployCvm ? cvm.outputs.cvmPrincipalId : ''
 output cvmPrivateIp string = deployCvm ? cvm.outputs.privateIpAddress : ''

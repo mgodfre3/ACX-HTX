@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "14916477391912332434"
+      "templateHash": "3148642569837940699"
     }
   },
   "parameters": {
@@ -327,7 +327,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "9481015654753082521"
+              "templateHash": "6847712880051328233"
             }
           },
           "parameters": {
@@ -358,6 +358,7 @@
           },
           "variables": {
             "storageIdentityName": "[format('{0}-mi-storage', parameters('namePrefix'))]",
+            "producerIdentityName": "[format('{0}-producer-mi', parameters('namePrefix'))]",
             "roleKvCryptoServiceEncryptionUser": "[format('/subscriptions/{0}/providers/Microsoft.Authorization/roleDefinitions/e147488a-f6f5-4113-8e2d-b22465e65bf6', subscription().subscriptionId)]"
           },
           "resources": [
@@ -365,6 +366,13 @@
               "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
               "apiVersion": "2023-01-31",
               "name": "[variables('storageIdentityName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[variables('producerIdentityName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]"
             },
@@ -395,6 +403,18 @@
             "storageIdentityClientId": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').clientId]"
+            },
+            "producerIdentityId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName'))]"
+            },
+            "producerIdentityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').principalId]"
+            },
+            "producerIdentityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').clientId]"
             }
           }
         }
@@ -433,6 +453,9 @@
           "storageIdentityId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.storageIdentityId.value]"
           },
+          "producerIdentityPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityPrincipalId.value]"
+          },
           "workloadSubnetId": {
             "value": "[variables('workloadSubnetId')]"
           }
@@ -444,7 +467,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "10411332669368365417"
+              "templateHash": "193035019703948869"
             }
           },
           "parameters": {
@@ -484,6 +507,12 @@
                 "description": "User-assigned MI resource ID used for storage CMK."
               }
             },
+            "producerIdentityPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Principal ID of the producer user-assigned MI. Granted Storage Blob Data Contributor scoped ONLY to the sovereign-encrypted container."
+              }
+            },
             "workloadSubnetId": {
               "type": "string",
               "metadata": {
@@ -494,7 +523,8 @@
           "variables": {
             "storageName": "[toLower(format('{0}stg{1}', parameters('namePrefix'), uniqueString(resourceGroup().id)))]",
             "trimmedName": "[if(greater(length(variables('storageName')), 24), substring(variables('storageName'), 0, 24), variables('storageName'))]",
-            "peName": "[format('{0}-blob-pe', variables('trimmedName'))]"
+            "peName": "[format('{0}-blob-pe', variables('trimmedName'))]",
+            "roleStorageBlobDataContributor": "[format('/subscriptions/{0}/providers/Microsoft.Authorization/roleDefinitions/ba92f5b4-2d11-453d-a403-e96b0029c9fe', subscription().subscriptionId)]"
           },
           "resources": [
             {
@@ -571,6 +601,31 @@
               ]
             },
             {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', variables('trimmedName'), 'default', 'sovereign-encrypted')]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('trimmedName'), 'default')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('trimmedName'), 'default', 'sovereign-encrypted')]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('trimmedName'), 'default', 'sovereign-encrypted'), parameters('producerIdentityPrincipalId'), 'blob-data-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[variables('roleStorageBlobDataContributor')]",
+                "principalId": "[parameters('producerIdentityPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('trimmedName'), 'default', 'sovereign-encrypted')]"
+              ]
+            },
+            {
               "type": "Microsoft.Network/privateEndpoints",
               "apiVersion": "2023-11-01",
               "name": "[variables('peName')]",
@@ -609,6 +664,10 @@
             "coldContainerName": {
               "type": "string",
               "value": "sovereign-cold"
+            },
+            "encryptedContainerName": {
+              "type": "string",
+              "value": "sovereign-encrypted"
             },
             "privateEndpointId": {
               "type": "string",
@@ -1494,6 +1553,22 @@
     "coldContainerName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.coldContainerName.value]"
+    },
+    "encryptedContainerName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.encryptedContainerName.value]"
+    },
+    "producerIdentityId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityId.value]"
+    },
+    "producerIdentityClientId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityClientId.value]"
+    },
+    "producerIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityPrincipalId.value]"
     },
     "cvmName": {
       "type": "string",
