@@ -111,9 +111,9 @@ Do NOT execute these yet — Adam is meeting the customer this evening and may a
 
 ## Open questions to resolve before code work starts
 
-1. **Separate "dummy" AKV key, or reuse `htx-kek`?** Adam suggested a distinct key strictly for OS attestation, so it's obvious the AKV key never touches data. Cleaner narrative but one more resource to manage. Recommend: create a new key `acxhtx-cvm-attestation-key` for demos, leave `htx-kek` in place for the prior CMK pattern (which may still get used in a different customer conversation).
-2. **Real SEV-SNP or persistent stub?** Quota is not landing on its own; we submitted a case (see `docs/deployment-status.md`). If the customer wants to see the burst demo before quota lands, we go with the stub and are explicit about it on-stage. Adam approved this.
-3. **Storage account fate.** Leave deployed but hidden, or delete to prevent the customer inferring we planned to use it? Recommend: leave deployed, do not show, and explicitly retire the storage narrative in the executive summary rewrite.
+1. ~~**Separate "dummy" AKV key, or reuse `htx-kek`?**~~ **RESOLVED 2026-09-09:** New key `acxhtx-cvm-attestation-key` (RSA-HSM 3072, wrapKey/unwrapKey only, tagged `Purpose=cvm-os-attestation`) provisioned in `acxhtx-kv-aguuve6oq6by6`. Distinct from `htx-kek`. Codified in `infra/modules/keyvault.bicep`.
+2. **Real SEV-SNP or persistent stub?** Quota is not landing on its own; we submitted a case (see the top of this file). If the customer wants to see the burst demo before quota lands, we go with the stub and are explicit about it on-stage. Adam approved this.
+3. ~~**Storage account fate.**~~ **RESOLVED 2026-09-09:** Deleted. Storage account, both containers, private endpoint, EventGrid topic, and both storage-related UAMIs all removed. Bicep gates the storage plane behind `deployStorage=false` (default) so future deploys will not recreate it. Rationale: any resource in the RG named "storage" hurts the customer conversation. See `docs/deployment-status.md` for full deletion inventory.
 4. **Where does the edge fetch endpoint live?** Standing up a second service on `172.22.218.200` is easy, but if we want to show a proper "edge fabric" we might put it on a different ALDO node. Not blocking; just a scenography choice.
 
 ## Next actions (blocked until Adam's post-meeting update)

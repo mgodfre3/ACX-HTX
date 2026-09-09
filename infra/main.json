@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "3148642569837940699"
+      "templateHash": "3405600966791053467"
     }
   },
   "parameters": {
@@ -86,6 +86,13 @@
         "description": "Deploy the AI Foundry hub + project + CMK-encrypted ACR (model registry)."
       }
     },
+    "deployStorage": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the sovereign storage account (blob CMK-encrypted + private endpoint + producer UAMI + role assignments). RETIRED from the customer-facing demo per 2026-09-09 direction change (customer will not store data in Azure). Kept as a Bicep-managed opt-in for optional side-by-side comparisons or future customer conversations. Default false: no storage plane is deployed."
+      }
+    },
     "contributorGroupObjectId": {
       "type": "string",
       "defaultValue": "e09d9488-62b2-4ca2-a4a2-232348662665",
@@ -146,7 +153,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "12946014537164138670"
+              "templateHash": "7027463425415957302"
             }
           },
           "parameters": {
@@ -172,7 +179,14 @@
               "type": "string",
               "defaultValue": "htx-kek",
               "metadata": {
-                "description": "KEK name inside the vault."
+                "description": "KEK name inside the vault (application-data KEK — used by the storage/disk/ACR CMK path in the prior demo iteration)."
+              }
+            },
+            "cvmAttestationKeyName": {
+              "type": "string",
+              "defaultValue": "acxhtx-cvm-attestation-key",
+              "metadata": {
+                "description": "OS/attestation key name — dedicated to gating CVM startup. NEVER used to protect customer application data. Kept distinct from kekName so the \"Azure Key Vault does not hold the data key\" narrative is provable by inspection."
               }
             },
             "workloadSubnetId": {
@@ -223,6 +237,27 @@
                   "unwrapKey",
                   "encrypt",
                   "decrypt"
+                ],
+                "attributes": {
+                  "enabled": true,
+                  "exportable": false
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('vaultName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.KeyVault/vaults/keys",
+              "apiVersion": "2024-04-01-preview",
+              "name": "[format('{0}/{1}', variables('vaultName'), parameters('cvmAttestationKeyName'))]",
+              "tags": "[union(parameters('tags'), createObject('Purpose', 'cvm-os-attestation'))]",
+              "properties": {
+                "kty": "RSA-HSM",
+                "keySize": 3072,
+                "keyOps": [
+                  "wrapKey",
+                  "unwrapKey"
                 ],
                 "attributes": {
                   "enabled": true,
@@ -285,6 +320,18 @@
               "type": "string",
               "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('kekName')), '2024-04-01-preview').keyUriWithVersion]"
             },
+            "cvmAttestationKeyName": {
+              "type": "string",
+              "value": "[parameters('cvmAttestationKeyName')]"
+            },
+            "cvmAttestationKeyUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('cvmAttestationKeyName')), '2024-04-01-preview').keyUri]"
+            },
+            "cvmAttestationKeyUriWithVersion": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults/keys', variables('vaultName'), parameters('cvmAttestationKeyName')), '2024-04-01-preview').keyUriWithVersion]"
+            },
             "privateEndpointId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateEndpoints', variables('peName'))]"
@@ -318,6 +365,9 @@
           },
           "keyVaultName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.keyVaultName.value]"
+          },
+          "deployStorageIdentities": {
+            "value": "[parameters('deployStorage')]"
           }
         },
         "template": {
@@ -327,7 +377,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "6847712880051328233"
+              "templateHash": "619771799870137687"
             }
           },
           "parameters": {
@@ -354,6 +404,13 @@
               "metadata": {
                 "description": "Existing Key Vault name (RBAC-enabled)."
               }
+            },
+            "deployStorageIdentities": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "If true, deploy the storage-related identities (storage CMK MI + producer MI) alongside the storage plane. When false, only ACR/other identities remain."
+              }
             }
           },
           "variables": {
@@ -363,6 +420,7 @@
           },
           "resources": [
             {
+              "condition": "[parameters('deployStorageIdentities')]",
               "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
               "apiVersion": "2023-01-31",
               "name": "[variables('storageIdentityName')]",
@@ -370,6 +428,7 @@
               "tags": "[parameters('tags')]"
             },
             {
+              "condition": "[parameters('deployStorageIdentities')]",
               "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
               "apiVersion": "2023-01-31",
               "name": "[variables('producerIdentityName')]",
@@ -377,6 +436,7 @@
               "tags": "[parameters('tags')]"
             },
             {
+              "condition": "[parameters('deployStorageIdentities')]",
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
               "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
@@ -394,27 +454,27 @@
           "outputs": {
             "storageIdentityId": {
               "type": "string",
-              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName'))]"
+              "value": "[if(parameters('deployStorageIdentities'), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '')]"
             },
             "storageIdentityPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').principalId]"
+              "value": "[if(parameters('deployStorageIdentities'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').principalId, '')]"
             },
             "storageIdentityClientId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').clientId]"
+              "value": "[if(parameters('deployStorageIdentities'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('storageIdentityName')), '2023-01-31').clientId, '')]"
             },
             "producerIdentityId": {
               "type": "string",
-              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName'))]"
+              "value": "[if(parameters('deployStorageIdentities'), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '')]"
             },
             "producerIdentityPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').principalId]"
+              "value": "[if(parameters('deployStorageIdentities'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').principalId, '')]"
             },
             "producerIdentityClientId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').clientId]"
+              "value": "[if(parameters('deployStorageIdentities'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('producerIdentityName')), '2023-01-31').clientId, '')]"
             }
           }
         }
@@ -425,6 +485,7 @@
       ]
     },
     {
+      "condition": "[parameters('deployStorage')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "storage-deploy",
@@ -1546,29 +1607,37 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.kekName.value]"
     },
+    "cvmAttestationKeyName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.cvmAttestationKeyName.value]"
+    },
+    "cvmAttestationKeyUriWithVersion": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.cvmAttestationKeyUriWithVersion.value]"
+    },
     "storageAccountName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.storageAccountName.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.storageAccountName.value, '')]"
     },
     "coldContainerName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.coldContainerName.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.coldContainerName.value, '')]"
     },
     "encryptedContainerName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.encryptedContainerName.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.encryptedContainerName.value, '')]"
     },
     "producerIdentityId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityId.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityId.value, '')]"
     },
     "producerIdentityClientId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityClientId.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityClientId.value, '')]"
     },
     "producerIdentityPrincipalId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityPrincipalId.value]"
+      "value": "[if(parameters('deployStorage'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity-deploy'), '2025-04-01').outputs.producerIdentityPrincipalId.value, '')]"
     },
     "cvmName": {
       "type": "string",

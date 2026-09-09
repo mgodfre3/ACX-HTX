@@ -1,6 +1,6 @@
 # Deployment Status
 
-**Last deploy:** `acx-htx-producer-mi-20260909-1017` (producer UAMI + container role assignment codified in Bicep)
+**Last deploy:** `acx-htx-attest-key-20260909-1228` (retire storage plane; add dedicated CVM OS/attestation key)
 **RG:** `ACX-HTX` in West US 2
 **Repo:** https://github.com/mgodfre3/ACX-HTX
 
@@ -9,21 +9,31 @@
 | Resource | Name | State |
 |---|---|---|
 | Key Vault Premium (HSM-backed) | `acxhtx-kv-aguuve6oq6by6` | ✅ RBAC, firewall Deny + AzureServices bypass, private endpoint |
-| KEK (RSA-HSM 3072) | `htx-kek` | ✅ Backs storage CMK + disk CMK + ACR CMK |
-| Storage Account | `acxhtxstgaguuve6oq6by6` | ✅ CMK active, public access Disabled, private endpoint |
-| Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops (consumer read side) |
-| Blob container | `sovereign-encrypted` | ✅ Producer write target — no public access, private endpoint only |
-| User-assigned MI (storage) | `acxhtx-mi-storage` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
+| **Application-data KEK** (RSA-HSM 3072) | `htx-kek` | ✅ Retained for disk CMK + ACR CMK. **No longer used to protect customer application data** — that's the on-prem Vault Transit key, per burst-CVM architecture. |
+| **OS / attestation key** (RSA-HSM 3072) | `acxhtx-cvm-attestation-key` | ✅ **New (2026-09-09).** Dedicated to gating CVM boot / OS attestation. Never touches customer data. Separate from `htx-kek` on purpose so the "AKV key does not hold the data key" story is provable by inspection. Ops: wrapKey / unwrapKey only. |
 | User-assigned MI (ACR) | `acxhtx-acr-mi` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
-| **User-assigned MI (producer)** | `acxhtx-producer-mi` | ✅ Attached to jump host `AdaptiveCloud-Management/ACX-JSW01-WUS2`. Client ID `005f8913-6ad1-4abb-b42e-d87df65af485`. Role: **Storage Blob Data Contributor scoped to container `sovereign-encrypted` only** — cannot read `sovereign-cold` or any other container. |
 | Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled |
-| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running (private IP `10.255.250.9`), OS disk **CMK-encrypted via customer KEK**, no public IP |
+| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running (private IP `10.255.250.9`), OS disk **CMK-encrypted via `htx-kek`**, no public IP. Stand-in for the target SEV-SNP CVM; attestation stub lives in the on-prem unwrap service. |
 | **ACR (Premium, CMK-encrypted)** | `acxhtxacraguuve6o` | ✅ Encryption enabled, key `htx-kek`, model registry |
-| **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to storage + KV + ACR + AppInsights |
+| **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to Foundry-side storage + KV + ACR + AppInsights |
 | **Foundry project** | `acxhtx-foundry-proj` | ✅ Kind=Project, child of hub |
 | Foundry associated KV | `acxhtx-fdy-kv-aguuve` | ✅ RBAC-authorized (Foundry uses role assignments, not access policies) |
-| Foundry associated storage | `acxhtxfdystgaguuve6o` | ✅ StorageV2 |
+| Foundry associated storage | `acxhtxfdystgaguuve6o` | ✅ StorageV2 — **isolated to Foundry workspace**, does not hold customer application data |
 | Foundry App Insights | `acxhtx-fdy-ai-aguuve` | ✅ Web kind |
+
+## Retired 2026-09-09 — sovereign storage plane
+
+Per direction change (customer will not store data in Azure), the following resources were **deleted** and gated behind `deployStorage=false` in `infra/main.bicepparam` so future deploys do not recreate them:
+
+| Deleted resource | Notes |
+|---|---|
+| Storage account `acxhtxstgaguuve6oq6by6` | Blob CMK, private endpoint, `sovereign-cold` + `sovereign-encrypted` containers all gone. Account-level soft-delete tombstone exists at subscription scope (Storage RP has no user-callable purge API); tombstone is NOT visible in the RG or portal browse UI. |
+| Private endpoint `acxhtxstgaguuve6oq6by6-blob-pe` | Deleted with the SA. |
+| Event Grid system topic `acxhtxstgaguuve6oq6by6-*` | Deleted with the SA. |
+| UAMI `acxhtx-mi-storage` | Was the storage CMK identity. |
+| UAMI `acxhtx-producer-mi` | Detached from `AdaptiveCloud-Management/ACX-JSW01-WUS2` first, then deleted. |
+
+To re-deploy the storage plane for a different customer conversation, flip `deployStorage = true` in `infra/main.bicepparam` and re-run `az deployment sub create` — all storage code paths are preserved in Bicep, just gated off.
 
 ## Pending — AMD Confidential VM (SEV-SNP)
 
@@ -72,42 +82,11 @@ az deployment sub create `
 `cvm.bicep` currently uses `securityEncryptionType: 'DiskWithVMGuestState'` (platform-managed key for the guest-state blob, platform key for the OS disk). To get the "revoke KEK → CVM disk unreadable" behavior the demo advertises, upgrade to `DiskWithVMGuestStateCMK` backed by a **Confidential** Disk Encryption Set (`encryptionType: 'ConfidentialVmEncryptedWithCustomerKey'`) against a KEK that has a Secure Key Release (SKR) policy attached. `htx-kek` does not currently have an SKR policy, so this needs a KEK rotation planned alongside the demo cutover.
 
 
-## Producer identity (durable, for scheduled uploads)
+## Producer identity — RETIRED 2026-09-09
 
-The first end-to-end producer upload was relayed through an authenticated Azure jump-host session. Repeat scheduled uploads use a dedicated user-assigned managed identity — **no secrets stored on the jump host, no SAS tokens to rotate**.
+Previously described a UAMI `acxhtx-producer-mi` attached to the jump host `ACX-JSW01-WUS2` with Storage Blob Data Contributor scoped to the `sovereign-encrypted` container. **All three (UAMI, role assignment, container) were deleted as part of the sovereign-storage-plane retirement.** See "Retired 2026-09-09 — sovereign storage plane" above for the full list.
 
-| Property | Value |
-|---|---|
-| UAMI name | `acxhtx-producer-mi` |
-| Resource group | `ACX-HTX` |
-| Client ID | `005f8913-6ad1-4abb-b42e-d87df65af485` |
-| Principal ID | `2e66a41e-ea99-4882-b807-262b8709e151` |
-| Role | Storage Blob Data Contributor |
-| Scope | Container `sovereign-encrypted` **only** (not the whole storage account) |
-| Attached to | `AdaptiveCloud-Management/ACX-JSW01-WUS2` (jump host) |
-
-**Why this scope:** the producer needs write on `sovereign-encrypted`. It has no access to `sovereign-cold`, no access to the storage account control plane, and no consumer read path — so a compromise of the producer identity cannot forge cold-slice data or read anything the consumer sees.
-
-**Producer configuration on the jump host** — point `azure-identity` at this UAMI's client ID:
-
-```powershell
-# One-time on the jump host (persist for the scheduled task account)
-[Environment]::SetEnvironmentVariable(
-  'AZURE_CLIENT_ID', '005f8913-6ad1-4abb-b42e-d87df65af485', 'Machine')
-# Producer picks it up via DefaultAzureCredential / ManagedIdentityCredential:
-#   cred = DefaultAzureCredential()   # honors AZURE_CLIENT_ID for UAMI selection
-#   blob = BlobServiceClient(
-#     account_url='https://acxhtxstgaguuve6oq6by6.blob.core.windows.net',
-#     credential=cred)
-```
-
-**Codified in Bicep** — the UAMI is created in `infra/modules/identity.bicep`, and the container-scoped role assignment is in `infra/modules/storage.bicep` (both under deterministic `guid()` names — idempotent on future deploys). The jump-host attachment is out-of-band (cross-RG, VM not in the template); reproduce with:
-
-```powershell
-az vm identity assign `
-  -g AdaptiveCloud-Management -n ACX-JSW01-WUS2 `
-  --identities /subscriptions/fbaf508b-cb61-4383-9cda-a42bfa0c7bc9/resourceGroups/ACX-HTX/providers/Microsoft.ManagedIdentity/userAssignedIdentities/acxhtx-producer-mi
-```
+The Bicep code for this identity still exists in `infra/modules/identity.bicep` behind the `deployStorageIdentities` conditional (driven by the top-level `deployStorage` toggle). If a future customer conversation requires the blob flow, flip `deployStorage = true` in `infra/main.bicepparam` and it comes back.
 
 
 ## Key custody proof (three levels, one key)

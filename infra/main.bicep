@@ -36,6 +36,9 @@ param deployCmkVm bool = true
 @description('Deploy the AI Foundry hub + project + CMK-encrypted ACR (model registry).')
 param deployFoundry bool = true
 
+@description('Deploy the sovereign storage account (blob CMK-encrypted + private endpoint + producer UAMI + role assignments). RETIRED from the customer-facing demo per 2026-09-09 direction change (customer will not store data in Azure). Kept as a Bicep-managed opt-in for optional side-by-side comparisons or future customer conversations. Default false: no storage plane is deployed.')
+param deployStorage bool = false
+
 @description('Object ID of the ACX_HTX_Contributor Entra security group. Baked in from az ad group create output on 2026-09-08.')
 param contributorGroupObjectId string = 'e09d9488-62b2-4ca2-a4a2-232348662665'
 
@@ -72,10 +75,11 @@ module identity 'modules/identity.bicep' = {
     namePrefix: namePrefix
     tags: tags
     keyVaultName: keyvault.outputs.keyVaultName
+    deployStorageIdentities: deployStorage
   }
 }
 
-module storage 'modules/storage.bicep' = {
+module storage 'modules/storage.bicep' = if (deployStorage) {
   scope: rg
   name: 'storage-deploy'
   params: {
@@ -144,12 +148,14 @@ module contributorRbac 'modules/contributor-rbac.bicep' = if (deployFoundry) {
 output resourceGroupName string = rg.name
 output keyVaultName string = keyvault.outputs.keyVaultName
 output kekName string = keyvault.outputs.kekName
-output storageAccountName string = storage.outputs.storageAccountName
-output coldContainerName string = storage.outputs.coldContainerName
-output encryptedContainerName string = storage.outputs.encryptedContainerName
-output producerIdentityId string = identity.outputs.producerIdentityId
-output producerIdentityClientId string = identity.outputs.producerIdentityClientId
-output producerIdentityPrincipalId string = identity.outputs.producerIdentityPrincipalId
+output cvmAttestationKeyName string = keyvault.outputs.cvmAttestationKeyName
+output cvmAttestationKeyUriWithVersion string = keyvault.outputs.cvmAttestationKeyUriWithVersion
+output storageAccountName string = deployStorage ? storage!.outputs.storageAccountName : ''
+output coldContainerName string = deployStorage ? storage!.outputs.coldContainerName : ''
+output encryptedContainerName string = deployStorage ? storage!.outputs.encryptedContainerName : ''
+output producerIdentityId string = deployStorage ? identity.outputs.producerIdentityId : ''
+output producerIdentityClientId string = deployStorage ? identity.outputs.producerIdentityClientId : ''
+output producerIdentityPrincipalId string = deployStorage ? identity.outputs.producerIdentityPrincipalId : ''
 output cvmName string = deployCvm ? cvm.outputs.cvmName : ''
 output cvmPrincipalId string = deployCvm ? cvm.outputs.cvmPrincipalId : ''
 output cvmPrivateIp string = deployCvm ? cvm.outputs.privateIpAddress : ''
