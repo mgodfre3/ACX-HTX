@@ -40,6 +40,13 @@ from . import attestation
 LISTEN = os.environ.get("EDGE_FETCH_LISTEN", "0.0.0.0:8444")
 STORAGE_ROOT = Path(os.environ.get("EDGE_FETCH_STORAGE_ROOT", "/var/lib/edge-fetch"))
 UNWRAP_URL = os.environ.get("EDGE_FETCH_UNWRAP_URL", "http://127.0.0.1:8443/unwrap")
+# The legacy unwrap service on :8443 uses `/health` (not `/healthz`). Make this
+# overridable so a future service revision using a different path can be probed
+# without a code change. This URL is used only by /healthz — it does not affect
+# the actual attestation or unwrap path.
+UNWRAP_HEALTH_URL = os.environ.get(
+    "EDGE_FETCH_UNWRAP_HEALTH_URL", "http://127.0.0.1:8443/health"
+)
 ALLOWED_ARM_IDS = [
     s.strip().lower() for s in os.environ.get("EDGE_FETCH_ALLOWED_ARM_IDS", "").split(",") if s.strip()
 ]
@@ -160,7 +167,7 @@ async def healthz() -> dict:
     unwrap_reachable = False
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get(UNWRAP_URL.replace("/unwrap", "/healthz"))
+            r = await client.get(UNWRAP_HEALTH_URL)
             unwrap_reachable = r.status_code == 200
     except Exception:
         unwrap_reachable = False
@@ -169,6 +176,7 @@ async def healthz() -> dict:
         "version": app.version,
         "attestation_mode": MODE,
         "unwrap_service": "reachable" if unwrap_reachable else "unreachable",
+        "unwrap_health_url": UNWRAP_HEALTH_URL,
         "storage_root": str(STORAGE_ROOT),
         "allowed_arm_id_count": len(ALLOWED_ARM_IDS),
         "vault_transit_key": VAULT_TRANSIT_KEY,
