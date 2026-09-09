@@ -1,5 +1,7 @@
 # Sovereign Hybrid Demo — Azure Buildout
 
+> **Direction change (2026-09-09):** The demo is being retooled around an **edge-controlled burst-CVM flow** where no customer data ever lands in Azure Storage and the application data key stays on-premises. See [`docs/burst-cvm-architecture.md`](docs/burst-cvm-architecture.md) for the design of record. The sections below describe the **prior** iteration (encrypted blob in Azure + CMK-everywhere) — the infrastructure remains deployed but is no longer the customer-facing narrative.
+
 The Azure public-cloud side of the "Master the Environment, Extend the Scale" sovereign hybrid architecture, plus the model-training + distribution pipeline that feeds Arc-AKS clusters on Azure Local Disconnected Operations (ALDO) stamps.
 
 **Live deployment status:** see [`docs/deployment-status.md`](docs/deployment-status.md).  

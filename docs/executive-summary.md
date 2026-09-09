@@ -6,6 +6,8 @@
 **Audience:** HTX Leadership
 **Prepared by:** Michael Godfrey, Adaptive Cloud Lab
 
+> **Direction change (2026-09-09):** The customer will not store data in Azure Storage and requires the application data key to remain on-premises. The current design of record is the **edge-controlled burst-CVM flow** in [`burst-cvm-architecture.md`](burst-cvm-architecture.md). The narrative below is preserved as the **prior iteration** and is not the story being pitched anymore. The infrastructure it describes remains deployed for optional side-by-side comparison, but the executive pitch and diagrams need to be redrawn once Adam confirms customer direction after 2026-09-09 evening meeting.
+
 ---
 
 ## The Problem

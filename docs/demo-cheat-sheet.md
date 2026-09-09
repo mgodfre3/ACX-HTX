@@ -1,5 +1,7 @@
 # HTX Sovereign Hybrid — Demo Cheat Sheet
 
+> **Direction change (2026-09-09):** This cheat sheet describes the **prior** blob-based demo flow. The current design of record is the edge-controlled burst-CVM flow in [`burst-cvm-architecture.md`](burst-cvm-architecture.md). This cheat sheet needs to be rewritten around the two-key toggle (edge Vault ⇒ CVM cannot decrypt; Azure Key Vault OS-attestation key ⇒ CVM cannot start) once Adam confirms scope after 2026-09-09 evening customer meeting. **Do not use as-is on stage.**
+
 **Print this. Keep it open in a side monitor. Every command tested against the live stack.**
 
 ---
