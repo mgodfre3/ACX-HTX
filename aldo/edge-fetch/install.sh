@@ -107,7 +107,8 @@ WantedBy=multi-user.target
 UNIT
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now edge-fetch.service
+sudo systemctl enable edge-fetch.service
+sudo systemctl restart edge-fetch.service
 
 echo
 echo "-- edge-fetch service status --"
