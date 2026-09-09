@@ -1,8 +1,10 @@
 # Sovereign Hybrid Demo — Azure Buildout
 
-> **Direction change (2026-09-09):** The demo is being retooled around an **edge-controlled burst-CVM flow** where no customer data ever lands in Azure Storage and the application data key stays on-premises. See [`docs/burst-cvm-architecture.md`](docs/burst-cvm-architecture.md) for the design of record. The sections below describe the **prior** iteration (encrypted blob in Azure + CMK-everywhere) — the infrastructure remains deployed but is no longer the customer-facing narrative.
+> **Current design of record (2026-09-09):** [`docs/burst-cvm-architecture.md`](docs/burst-cvm-architecture.md) — edge-controlled burst-CVM flow. **No customer data in Azure Storage. Application data key stays on-premises.**
+>
+> The sections below describe the **prior** blob-based iteration. The infrastructure it once described has been partly retired (see [`docs/deployment-status.md`](docs/deployment-status.md)). Executive pitch is in [`docs/executive-summary.md`](docs/executive-summary.md) (rewritten). On-stage script is in [`docs/demo-storyboard.md`](docs/demo-storyboard.md). Print-friendly command matrix is in [`docs/demo-cheat-sheet.md`](docs/demo-cheat-sheet.md).
 
-The Azure public-cloud side of the "Master the Environment, Extend the Scale" sovereign hybrid architecture, plus the model-training + distribution pipeline that feeds Arc-AKS clusters on Azure Local Disconnected Operations (ALDO) stamps.
+The Azure public-cloud side of the sovereign hybrid architecture, plus the ALDO edge services and the CVM burst consumer that together prove the trust boundary is cryptographic, not geographic.
 
 **Live deployment status:** see [`docs/deployment-status.md`](docs/deployment-status.md).  
 **Executive summary + diagrams:** see [`docs/executive-summary.md`](docs/executive-summary.md).  

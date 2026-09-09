@@ -1,222 +1,151 @@
-# HTX Sovereign Hybrid — Demo Cheat Sheet
+# Demo Cheat Sheet — Burst to Azure Without Giving Up the Keys
 
-> **Direction change (2026-09-09):** This cheat sheet describes the **prior** blob-based demo flow. The current design of record is the edge-controlled burst-CVM flow in [`burst-cvm-architecture.md`](burst-cvm-architecture.md). This cheat sheet needs to be rewritten around the two-key toggle (edge Vault ⇒ CVM cannot decrypt; Azure Key Vault OS-attestation key ⇒ CVM cannot start) once Adam confirms scope after 2026-09-09 evening customer meeting. **Do not use as-is on stage.**
+Print this. Keep the laptop's font size big enough that the audience-facing monitor is readable.
 
-**Print this. Keep it open in a side monitor. Every command tested against the live stack.**
+**Full script:** [`demo-storyboard.md`](demo-storyboard.md). This is the command-only summary.
+**Design of record:** [`burst-cvm-architecture.md`](burst-cvm-architecture.md).
 
----
+## The one-sentence pitch
 
-## The one-sentence pitch (memorize)
+> Azure can start the machine. Only the edge can unlock the data.
 
-> HTX keeps its keys, sensitive data, and inference on-prem. Azure adds scale for storage, training, and non-sensitive processing. **One customer key protects everything at rest. Revoke it once — everything locks.**
+## Pre-demo checklist (T-30 min)
 
----
+- [ ] VPN + tenant: `az account show --query tenantId -o tsv` returns `d1623670-9777-4399-aaf6-01d87b84ef1d`.
+- [ ] Edge reachable: `ping 172.22.218.200` from the operator laptop.
+- [ ] Edge services up:
+      `ssh edge@172.22.218.200 'systemctl is-active vault edge-fetch unwrap'` → three `active`s.
+- [ ] `curl -sS http://172.22.218.200:8444/healthz | jq` returns `status=ok`, `unwrap_service=reachable`.
+- [ ] CVM stopped-deallocated and pre-warmed once (start-stop cycle to shake out first-boot slowness).
+- [ ] Sample video seeded: `ssh edge@172.22.218.200 'ls /var/lib/edge-fetch/videos/'` shows at least `sample-video-01/`.
+- [ ] Portal tabs open: RG `ACX-HTX`; KV → Keys blade; VM `acxhtx-vm` overview.
+- [ ] Two shells side by side. Left = SSH to edge, split-tmux with `journalctl -u edge-fetch -f` on top. Right = local PowerShell, `az account set` done.
 
-## Before the demo (T-30 min)
+## Act 1 — What's here, what isn't (90 s)
 
-### 1. Two shells ready
-
-```powershell
-# Shell A: Public Azure Cloud (ACX-HTX)
-Connect-AzAccount -Tenant d1623670-9777-4399-aaf6-01d87b84ef1d
-Set-AzContext -Subscription 'AdaptiveCloudLab'
-
-# Shell B: ALDO Autonomous plane (Tokyo-WKLD)
-# Open a separate PS window
-Connect-AzAccount
-Set-AzContext -Subscription 'ef23bab2-5bd7-afa3-3013-d5116a941684'
+```bash
+# LEFT
+ls /var/lib/edge-fetch/videos/                                 # -> sample-video-01/
+cat /var/lib/edge-fetch/videos/sample-video-01/envelope.json | jq '.kek_ref, .wrap_algo'
+vault read transit/keys/htx-kek | head -20                     # key is on-prem
 ```
 
-### 2. Browser tabs to pre-open
-
-| # | Tab | URL |
-|---|---|---|
-| 1 | ACX-HTX resource group | `portal.azure.com` → RG `ACX-HTX` |
-| 2 | Key Vault `acxhtx-kv-aguuve6oq6by6` → **Keys** blade | showing `htx-kek` |
-| 3 | Storage Account `acxhtxstgaguuve6oq6by6` → **Encryption** blade | shows CMK reference |
-| 4 | ACR `acxhtxacraguuve6o` → **Encryption** blade | shows CMK reference |
-| 5 | GitHub repo | `github.com/mgodfre3/ACX-HTX` — open `docs/executive-summary.md` for the diagram |
-| 6 | ALDO portal / RG `ACX-HTX-ALDO` | (only if ALDO stack finished deploying) |
-
-### 3. Sanity checks
-
 ```powershell
-# Shell A: All 3 vaults happy?
-az resource list -g ACX-HTX --resource-type Microsoft.KeyVault/vaults --query "[].name" -o tsv
-
-# VM running?
-az vm get-instance-view -g ACX-HTX -n acxhtx-vm --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" -o tsv
-
-# Contributor group visible?
-az ad group show --group ACX_HTX_Contributor --query displayName -o tsv
+# RIGHT
+az resource list -g ACX-HTX --query "[?type=='Microsoft.Storage/storageAccounts'].name" -o table
+# -> only acxhtxfdystgaguuve6o (Foundry-internal). Say: "Zero customer bytes in Azure."
+az keyvault key list --vault-name acxhtx-kv-aguuve6oq6by6 --query "[].{name:name,tags:tags}" -o table
+# -> htx-kek + acxhtx-cvm-attestation-key (Purpose=cvm-os-attestation)
 ```
 
-If any of those return blank → **stop and fix before demoing**.
-
----
-
-## The story arc (5 acts, 12 minutes total)
-
-### Act 1 — "Here's the boundary" (1 min)
-
-Open GitHub `docs/executive-summary.md`. Show the mermaid diagram.
-
-**Say:** "This is one architecture, one boundary. Left side is HTX's data center. Right side is Azure. The line between them is a cryptographic boundary — not a network boundary. It exists because HTX holds the keys, not because the data doesn't move."
-
-### Act 2 — "The customer holds the key" (2 min)
-
-**Show the sovereign vault:**
+## Act 2 — Burst (60 s)
 
 ```powershell
-# Shell A - list the KEK
-az keyvault key show --vault-name acxhtx-kv-aguuve6oq6by6 --name htx-kek `
-  --query "{name:key.kid, kty:key.kty, ops:key.keyOps, hsm:managed}" -o json
+# RIGHT
+.\scripts\demo-burst.ps1 -Video sample-video-01 -Verbose
+# Watch: az vm start -> polling -> VM running
 ```
 
-Point at the output:
-- `kty: RSA-HSM` — hardware-backed
-- `hsm: true` — Microsoft never sees the private half
-- Vault has `enableRbacAuthorization: true`, `enablePurgeProtection: true`, `publicNetworkAccess: Disabled`
+## Act 3 — Attestation gate (90 s, mostly reading logs)
 
-**Say:** "This is `htx-kek`. It lives in an HSM inside Azure Key Vault Premium. Microsoft's control plane can't extract it. In production, this KEK is BYOK'd from the customer's Luna HSM — the demo uses AKV Premium as a stand-in."
+Left shell top pane (edge-fetch log) auto-tails. Look for:
 
-### Act 3 — "One key protects everything" (3 min)
+```
+release_granted video_id=sample-video-01 stub_indicator=STUB(imds,vmId=acxhtx-vm) arm_id=/subscriptions/.../acxhtx-vm
+```
 
-**Show the three surfaces the KEK protects:**
+Then the orchestrator prints the CVM's structured events:
+
+```
+{"event":"attestation_built","subject":"/subscriptions/.../acxhtx-vm","mode":"stub-tl-imds"}
+{"event":"envelope_fetched","envelope_bytes":...,"release_id":"..."}
+{"event":"dek_unwrapped","dek_bytes":32}
+{"event":"payload_decrypted","plaintext_bytes":...}
+```
+
+## Act 4 — Processing in CVM memory (60 s)
+
+Orchestrator continues printing:
+
+```
+{"event":"processed","sha256":"...","bytes":...,"frames_scanned":...}
+{"event":"result_encrypted","ciphertext_bytes":...}
+{"event":"new_dek_wrapped"}
+```
+
+While it runs, click the portal `acxhtx-vm` → **Metrics → OS disk read bytes** — flat.
+
+## Act 5 — Result home; CVM gone (45 s)
+
+```
+{"event":"result_submitted","result_id":"sample-video-01-<ts>","audit_id":"...","stored_path":"/var/lib/edge-fetch/processed/sample-video-01-.../envelope.json"}
+{"event":"done"}
+```
+
+Left shell (edge audit) shows `store_accepted` matching the `audit_id`.
+
+```bash
+# LEFT
+ls -la /var/lib/edge-fetch/processed/                         # -> the new result
+```
+
+Orchestrator auto-deallocates. Portal `acxhtx-vm` state → **Stopped (deallocated)** within ~30 s.
+
+Optional theatrical move:
 
 ```powershell
-# 1. Storage account CMK
-az storage account show -n acxhtxstgaguuve6oq6by6 -g ACX-HTX `
-  --query "{keySource:encryption.keySource, keyName:encryption.keyVaultProperties.keyName, publicAccess:publicNetworkAccess}" -o json
-
-# 2. Container registry CMK
-az acr show --name acxhtxacraguuve6o `
-  --query "{sku:sku.name, keyId:encryption.keyVaultProperties.keyIdentifier, status:encryption.status}" -o json
-
-# 3. VM OS disk CMK (via Disk Encryption Set)
-$diskId = az vm show -g ACX-HTX -n acxhtx-vm --query "storageProfile.osDisk.managedDisk.id" -o tsv
-az disk show --ids $diskId `
-  --query "{type:encryption.type, desId:encryption.diskEncryptionSetId}" -o json
+az vm run-command invoke -g ACX-HTX -n acxhtx-vm --command-id RunPowerShellScript --scripts "Get-Volume"
+# -> fails: "VM must be running". Say: "There is no live compute in Azure right now."
 ```
 
-**Say:** "Three CMK relationships. All three point at the same `htx-kek`. Storage. Container registry. VM disks. If HTX revokes this key, Microsoft's storage service can no longer wrap the data-encryption keys and every byte becomes unreadable ciphertext. Simultaneously."
-
-### Act 4 — "The customer keeps sensitive processing on-prem" (3 min)
-
-Switch to Shell B / ALDO portal.
-
-**Say:** "On the on-prem side we have HTX's Azure Local Disconnected Operations stamp — Tokyo-WKLD in this demo. A HashiCorp Vault holds the local mirror of `htx-kek`. And a Windows Server 2025 VM with A100 GPU passthrough runs Foundry Local."
-
-Show:
-```powershell
-# Shell B - ALDO VMs
-az resource list -g ACX-HTX-ALDO --resource-type Microsoft.AzureStackHCI/virtualMachineInstances --query "[].{name:name}" -o table
-```
-
-**Explain the split:**
-- **Local Foundry Local instance** runs Phi-4 mini + our custom HTX antenna detector
-- **Model came from Azure Foundry** — trained in the cloud on non-sensitive imagery, published to the CMK-encrypted ACR
-- **Pulled to on-prem** via ACR Connected Registry mirror — never in plaintext
-- **Sensitive inference stays local** — customer drone footage never leaves the boundary
-- **Model cache is BitLocker-encrypted** with a DEK from the local Vault
-
-### Act 5 — "The revoke button" (3 min)
-
-**The money shot.** This is why leadership is in the room.
+## Act 6a — Kill switch A: edge disables the data key (45 s)
 
 ```powershell
-# Show the KEK is enabled and being used
-az keyvault key show --vault-name acxhtx-kv-aguuve6oq6by6 --name htx-kek --query "attributes.enabled"
-# → true
-
-# Try to read encrypted blob — works today (through trusted-services bypass)
-az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign-cold --auth-mode login --query "[].name" -o tsv
+# RIGHT
+.\scripts\demo-toggle-vault.ps1 -Disable
+# -> red banner: EDGE VAULT: htx-kek DISABLED (min_decryption_version bumped)
+.\scripts\demo-burst.ps1 -Video sample-video-01
+# -> orchestrator prints attestation_built + envelope_fetched OK
+# -> then: {"event":"fatal","error":"unwrap failed: 403 ..."}
 ```
 
-**Say:** "Now watch this."
+Reset:
 
 ```powershell
-# THE REVOKE
-az keyvault key set-attributes --vault-name acxhtx-kv-aguuve6oq6by6 --name htx-kek --enabled false
-
-# Wait ~30 seconds for storage to notice the revocation
-Start-Sleep 30
-
-# Try to read the same blob
-az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign-cold --auth-mode login
-# → Storage returns 403 KeyVaultAuthenticationFailure or similar
+.\scripts\demo-toggle-vault.ps1 -Enable
 ```
 
-**Say:** "The blobs are still there. The ciphertext hasn't changed. But Storage can no longer request the wrap operation from Key Vault, so it can no longer decrypt the data-encryption keys, so nobody — including Microsoft — can read the plaintext. The same thing just happened to the VM disks and the ACR images. One command locked everything at rest."
-
-**Then restore it:**
+## Act 6b — Kill switch B: Azure disables the OS key (45 s)
 
 ```powershell
-az keyvault key set-attributes --vault-name acxhtx-kv-aguuve6oq6by6 --name htx-kek --enabled true
-Start-Sleep 30
-az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign-cold --auth-mode login
-# → works again
+# RIGHT
+.\scripts\demo-toggle-azurekek.ps1 -Disable
+# -> red banner: AZURE KEY VAULT: acxhtx-cvm-attestation-key DISABLED
+.\scripts\demo-burst.ps1 -Video sample-video-01
+# -> CVM boot fails (or attestation preflight fails; either way, no burst)
 ```
 
-**Say:** "And re-enabling brings everything back. This is what 'customer holds the keys' means in Azure. Not a policy statement — a cryptographic property."
+Reset:
 
----
+```powershell
+.\scripts\demo-toggle-azurekek.ps1 -Enable
+```
 
-## Common questions & 15-second answers
+## Panic recovery
 
-| Question | Answer |
+| Symptom | Command |
 |---|---|
-| **"Why not Confidential VMs everywhere?"** | SEV-SNP capacity isn't available on this subscription's hardware in any US region today. The CMK + Trusted Launch VM is the closest possible today; SEV-SNP swaps in with a config flag when capacity returns. |
-| **"Why not Arc-AKS on the edge?"** | A100 GPUs aren't supported on Arc-AKS (T4/A2 only). Foundry Local on Windows Server 2025 with DDA passthrough gets us the A100 hardware working with the same customer-key story. |
-| **"How do we know Microsoft can't read the data?"** | The CMK design: every touch of the DEK requires a wrap-op from Key Vault. Revoke the KEK → wrap fails → DEK stays encrypted → data stays ciphertext. Just showed this live. |
-| **"What's the actual key custody?"** | Demo uses AKV Premium HSM (public preview: FIPS 140-2 L3, cert-managed). Production replaces both sides with Luna HSMs — customer holds smart cards, does BYOK ceremony, key material never leaves the HSMs. |
-| **"What's the timeline?"** | Demo running now. Pilot with pilot HSMs: months. Full production with dual-Luna + real BYOK ceremony: years — planned and budgeted. This isn't a slideware promise. |
-| **"What about training data leakage?"** | Training in Azure Foundry uses the same CMK'd storage. Trained model pushed to CMK'd ACR. The customer key protects every stage — Microsoft's control-plane only ever handles ciphertext. |
-| **"Contributor group access?"** | `ACX_HTX_Contributor` Entra group has `Key Vault Crypto User` on both vaults — get/list keys, wrap/unwrap. Cannot delete or purge. |
-| **"What if the ExpressRoute drops?"** | Storage + ACR + Key Vault are all reached via private endpoints on `AC-Managment-WUS2` which peers to `AC-HubGW-EUS` and routes over ExpressRoute. If ER drops, the Azure side is unreachable from on-prem — but the on-prem Foundry Local + Vault + BitLocker-encrypted cache keep working, offline. That's disconnected-operations design. |
-| **"Can you show the on-prem key custody?"** | Yes — see aldo/scripts/init-vault.sh. Vault Transit engine holds the local `htx-kek` mirror. Same revoke story, on-prem side. |
+| edge-fetch dead | `ssh edge@172.22.218.200 'sudo systemctl restart edge-fetch'` |
+| Vault sealed | `ssh edge@172.22.218.200 'vault operator unseal $(jq -r .unseal_keys_b64[0] ~/vault-init.json)'` |
+| CVM stuck starting | `az vm redeploy -g ACX-HTX -n acxhtx-vm` (loses 2-3 min; abort demo) |
+| Orchestrator hangs | Ctrl-C. `az vm deallocate -g ACX-HTX -n acxhtx-vm --no-wait`. `.\scripts\demo-burst.ps1 -Status`. Start over. |
+| Toggle A stuck on | `.\scripts\demo-toggle-vault.ps1 -Enable`. If key was deleted with `-Delete`, re-seed videos. |
+| Toggle B stuck on | `.\scripts\demo-toggle-azurekek.ps1 -Enable`. |
 
----
+## Q&A anchors
 
-## Fallback if something breaks live
+Full list in [`demo-storyboard.md`](demo-storyboard.md#anchors-for-qa). The three most-likely:
 
-**Something in Azure won't respond?** → Point to `docs/executive-summary.md` + `docs/deployment-status.md` on GitHub. Everything visible in the portal (KV, storage, ACR, VM) has the CMK relationship documented there.
-
-**ALDO side isn't up?** → Say: "The on-prem stack is templated and mid-deploy. Same customer-key story. Ping me and I'll follow up." Then move on.
-
-**Revoke demo doesn't propagate in time?** → Have a screen recording ready:
-```powershell
-# Record this beforehand as a safety net:
-# Start-VMTraceRecording or just use OBS/Xbox Game Bar
-```
-
-**Portal is slow?** → CLI everything. It's faster and looks more expert anyway.
-
----
-
-## Reset script (run after demo)
-
-```powershell
-# Re-enable the KEK if you left it disabled
-az keyvault key set-attributes --vault-name acxhtx-kv-aguuve6oq6by6 --name htx-kek --enabled true
-
-# Verify everything is happy again
-az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign-cold --auth-mode login --query "[].name" -o tsv
-az disk show --ids (az vm show -g ACX-HTX -n acxhtx-vm --query "storageProfile.osDisk.managedDisk.id" -o tsv) --query provisioningState -o tsv
-```
-
----
-
-## Talking points that always land
-
-- **"Cryptographic boundary, not a geographic one."**
-- **"Microsoft can't read the data by construction, not by policy."**
-- **"One key. Three surfaces. One revoke."**
-- **"The path to Luna production is a config flag, not an architecture change."**
-- **"This isn't slideware. Everything you just saw is a git commit away."**
-
----
-
-*Full docs: https://github.com/mgodfre3/ACX-HTX*
-*Exec summary (with diagram): `docs/executive-summary.md`*
-*This cheat sheet: `docs/demo-cheat-sheet.md`*
+- *"Isn't this just a normal Azure VM with encrypted disks?"* → OS disk uses Azure KEK. **Customer data key is on-prem Vault, not Azure Key Vault.** Different key, different vault, different purpose. Show both.
+- *"Where does data live in Azure?"* → CVM RAM during a burst. Nowhere else. Portal metrics blade proves it.
+- *"Can you show real SEV-SNP?"* → Not today. Quota is 0 in westus2. Stub is labeled STUB in every log line. Swap is a parameter change.

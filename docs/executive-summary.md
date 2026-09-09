@@ -1,151 +1,105 @@
-# Master the Environment. Extend the Scale.
+# Burst to Azure Without Giving Up the Keys
 
-## Executive Summary — Sovereign Hybrid Compute Demo
-
+**Sovereign Hybrid Compute — Executive Summary**
 **Date:** September 2026
 **Audience:** HTX Leadership
 **Prepared by:** Michael Godfrey, Adaptive Cloud Lab
 
-> **Direction change (2026-09-09):** The customer will not store data in Azure Storage and requires the application data key to remain on-premises. The current design of record is the **edge-controlled burst-CVM flow** in [`burst-cvm-architecture.md`](burst-cvm-architecture.md). The narrative below is preserved as the **prior iteration** and is not the story being pitched anymore. The infrastructure it describes remains deployed for optional side-by-side comparison, but the executive pitch and diagrams need to be redrawn once Adam confirms customer direction after 2026-09-09 evening meeting.
+## The problem
 
----
+The customer needs elastic compute capacity but will not accept two conditions common to public-cloud sovereignty stories:
 
-## The Problem
+1. **Their data must not sit in Azure Storage** — not encrypted at rest, not wrapped, not anywhere.
+2. **Their application data key must never leave their premises** — Azure Key Vault cannot hold it, cannot be a fallback, cannot be a re-wrap target.
 
-Sensitive workloads have historically been treated as a binary choice: keep them on-premises and give up cloud scale, or move them to the cloud and give up sovereignty. Neither answer works for HTX.
+Traditional Azure BYOK / CMK / Confidential VM patterns all assume Azure Key Vault as the key custodian. That assumption is off the table.
 
-## The Solution: One Architecture, One Boundary
+## The solution: edge-controlled burst
 
-We demonstrate a **sovereign hybrid architecture** that gives HTX both — a single, provable security boundary that spans Azure Local (on-premises) and Azure public cloud, with keys and sensitive processing anchored inside HTX's data center.
+Compute runs on-premises by default. When more capacity is needed, an Azure Confidential VM is started **as burst capacity only**. It attests to itself. It calls back to the customer's on-premises Vault. The customer's edge decides — independently of Azure — whether the CVM is trustworthy enough to receive a data key. If yes, an encrypted work item is streamed to the CVM over the customer's ExpressRoute-peered private path. The CVM processes it in memory only, re-encrypts the result with a fresh key also released by the edge, and sends the result home. The CVM shuts down. No customer bytes remain in Azure. The key never touched Azure.
 
-```mermaid
-flowchart LR
-    subgraph LOCAL["<b>AZURE LOCAL — HTX Sovereign Boundary</b><br/><i>On-Premises · Customer-Controlled</i>"]
-        direction TB
-        L1["<b>1 · Master the Environment</b><br/>Control plane, identity,<br/>policy — all on-prem"]
-        L2["<b>2 · Hold the Keys</b><br/>Local HSMs / Key Vault<br/>generate & custody KEK"]
-        L5["<b>5 · Local GPUs</b><br/>Foundry Local · Phi-4<br/>on customer-owned GPUs"]
-    end
+## The two keys
 
-    subgraph CLOUD["<b>AZURE PUBLIC CLOUD — Elastic Scale</b><br/><i>Encrypted · Attested · Auditable</i>"]
-        direction TB
-        C3["<b>3 · Encrypted Storage</b><br/>Storage Account with<br/>Customer-Managed Key"]
-        C4["<b>4 · Confidential Compute</b><br/>AMD SEV-SNP CVM<br/>decrypts in TEE only"]
-        C5["<b>5 · Commercial GPUs</b><br/>Azure AI Foundry<br/>bulk / non-sensitive"]
-    end
+This is the point that must survive Q&A. There are two customer-owned keys — reviewers will conflate them if not carefully separated.
 
-    L2 -.->|"BYOK<br/>(wrapped key)"| C3
-    L5 -->|"Encrypted<br/>cold slice"| C3
-    C3 -->|"Encrypted<br/>fetch"| C4
+| Key | Where | Protects | Released by | Kill-switch effect |
+|---|---|---|---|---|
+| **Azure Key Vault OS/attestation key** — `acxhtx-cvm-attestation-key` | Azure Key Vault Premium HSM | CVM boot / OS-disk crypto | Azure, gated on platform attestation | Disable: CVM cannot start. No data exposure. |
+| **On-prem Vault Transit data key** — `htx-kek` | Customer HashiCorp Vault at 172.22.218.200 | Customer application data payload | The edge, only after independently validating CVM attestation | Disable: running CVM immediately loses ability to decrypt. Data is inert. |
 
-    classDef local fill:#0e3a5f,stroke:#22d3ee,stroke-width:2px,color:#fff
-    classDef cloud fill:#1e40af,stroke:#60a5fa,stroke-width:2px,color:#fff
-    class LOCAL,L1,L2,L5 local
-    class CLOUD,C3,C4,C5 cloud
-```
+> **"Azure can start the machine. Only the edge can unlock the data."**
 
-## What This Demo Proves
-
-| Claim | Evidence In The Demo |
-|-------|----------------------|
-| **HTX owns the environment.** | Azure Local runs the identity, policy, and control plane on-premises. Nothing on the sensitive path traverses Microsoft's operator plane. |
-| **HTX owns the keys.** | The key encryption key (KEK) is generated inside a **hardware-backed** Key Vault. The Azure copy is a bring-your-own-key representation. Microsoft has no path to plaintext. |
-| **Sensitive data is processed locally.** | Classified inference runs on customer-owned GPUs inside the boundary via Foundry Local. Data never leaves the site in plaintext. |
-| **Azure adds scale without adding exposure.** | Cold-slice data is encrypted on-prem with the local DEK, wrapped with the KEK, then shipped to Azure Blob. Microsoft holds ciphertext only. |
-| **When Azure processes the data, it happens inside a TEE.** | An AMD SEV-SNP Confidential VM attests to Microsoft Azure Attestation, unwraps the DEK via Key Vault, decrypts **in memory inside the enclave**, and produces a result. The Azure operator plane cannot read enclave memory. |
-| **Less-sensitive workloads still get commercial-scale GPUs.** | Bulk training and non-sensitive inference route to Azure AI Foundry — pay-as-you-go, elastic, and separated by policy from the sovereign path. |
-
-## The Sovereign Boundary is Cryptographic, Not Geographic
-
-Traditional "sovereign cloud" stories rely on where the data sits. Ours relies on **who can read it**. That answer is: only HTX, and only inside attested hardware. The physical boundary and the cryptographic boundary reinforce each other — but even if the storage account were world-readable, the ciphertext would still be worthless without the customer-controlled KEK.
-
-## What's In The Live Demo Today
-
-**Deployed and ready (Azure side, live in RG `ACX-HTX` today):**
-- Azure Key Vault Premium with HSM-backed customer KEK `htx-kek`
-- Storage account with customer-managed key encryption
-- Windows Server 2022 VM with Trusted Launch and OS disk encrypted by the customer KEK via a Disk Encryption Set — same key-custody story as a Confidential VM; SEV-SNP memory encryption swaps in later
-- **Azure AI Foundry hub + project + CMK-encrypted Azure Container Registry** — the model training + distribution registry, protected by the same customer KEK
-- Private endpoints (no public IPs anywhere in the sovereign path)
-- Managed identity + least-privilege RBAC wiring
-
-**One key, three surfaces, one boundary.** `htx-kek` backs the Storage CMK, the VM disk CMK, and the ACR CMK simultaneously. Revoke it once — everything encrypted at rest becomes unreadable. That's the demo.
-
-**Model lifecycle (new):** YOLOv8 cell-antenna detector training script + Azure ML job spec (`training/`), and Arc-AKS deployment manifests + ACR Connected Registry Bicep for distribution to ALDO stamps (`arc-aks/`). Reference architecture until the Tokyo WKLD stamp is ready.
-
-**Design note:** The "Strong" tier (CMK + Trusted Launch) is the closest solution available on this subscription's hardware today. The "Strongest" tier (Confidential VM with SEV-SNP memory encryption + guest attestation) requires capacity that Azure has not offered on any hardware cluster this subscription is currently assigned to. The demo narrative is unchanged; the upgrade path is a config flag.
-
-**In flight (Azure side, awaiting capacity):**
-- AMD SEV-SNP Confidential VM — blocked on SKU capacity across every US region tested; slot ready in Bicep behind `deployCvm` flag
-
-**Ready to bolt on (Azure Local side, in flight):**
-- Azure Local Disconnected Operations stamp with A100 GPUs
-- Foundry Local running Phi-4 inference
-- Local key vault generating and holding the KEK
-
-**Deferred until production ceremony:**
-- Real Luna HSM (Azure Key Vault Premium HSM is stand-in for the demo — the customer-facing story is unchanged)
-- GPU-backed Confidential VMs (Azure has single-H100 today; the confidentiality flow is the same)
-
-## What Leadership Should Take Away
-
-1. **This is not a slideware promise.** Every architectural component in the picture exists and is operational today. The demo runs end-to-end.
-2. **Microsoft cannot read HTX data — by construction, not by policy.** Keys are hardware-custody. Compute is enclave-attested. The trust model does not depend on Microsoft.
-3. **HTX gets sovereignty and scale.** Sensitive processing stays on-prem. Elastic storage and non-sensitive compute burst to Azure. One boundary, one operational model.
-4. **The path to Luna-HSM production is short.** The demo's key vault is a drop-in stand-in. Wiring Luna HSMs on both sides is procurement + integration, not architecture change.
-
-## Reference Architecture (Live Deployment)
+## Architecture
 
 ```mermaid
-flowchart TB
-    subgraph AL["<b>AZURE LOCAL — HTX Data Center</b>"]
-        direction TB
-        FL["Foundry Local<br/>Phi-4 · A100 GPU"]
-        LKV["Local Key Vault<br/>Generates KEK"]
-        LDATA[("Sensitive<br/>Dataset")]
-        LDATA --> FL
-        LKV -.wraps.-> FL
-    end
+sequenceDiagram
+    autonumber
+    participant Edge as ALDO Edge<br/>(Vault + video store<br/>+ orchestrator)
+    participant Azure as Azure Control<br/>Plane
+    participant CVM as Burst CVM<br/>(SEV-SNP target;<br/>Trusted Launch stub today)
+    participant EdgeApp as Edge Application
 
-    subgraph AZ["<b>AZURE PUBLIC CLOUD — RG: ACX-HTX (West US 2)</b>"]
-        direction TB
-        AKV["Azure Key Vault Premium<br/>HSM-Backed KEK<br/><i>Private Endpoint</i>"]
-        STG["Storage Account<br/>CMK Encryption<br/><i>Private Endpoint</i>"]
-        CVM["Confidential VM<br/>SEV-SNP · Windows 2022<br/><i>Private IP Only</i>"]
-        FDY["Azure AI Foundry<br/>Hub + Project"]
-
-        AKV -->|"CMK<br/>wraps DEK"| STG
-        STG -->|"Encrypted<br/>blob fetch"| CVM
-        AKV -->|"Attested<br/>DEK unwrap"| CVM
-    end
-
-    subgraph NET["<b>Existing VNet: AC-Managment-WUS2</b>"]
-        BAS["Azure Bastion"]
-    end
-
-    LKV ===>|"BYOK wrapped key<br/><b>encrypted link only</b>"| AKV
-    FL ===>|"Encrypted cold slice<br/><b>encrypted link only</b>"| STG
-
-    BAS -.->|"RDP<br/>private"| CVM
-
-    classDef local fill:#0e3a5f,stroke:#22d3ee,stroke-width:2px,color:#fff
-    classDef cloud fill:#1e40af,stroke:#60a5fa,stroke-width:2px,color:#fff
-    classDef net fill:#374151,stroke:#9ca3af,color:#fff
-    class AL,FL,LKV,LDATA local
-    class AZ,AKV,STG,CVM,FDY cloud
-    class NET,BAS net
+    Edge->>Azure: 1. Start CVM (out-of-band from edge orchestrator)
+    Azure->>CVM: 2. Boot; platform attestation gated on AKV OS key
+    CVM->>Azure: 3. Request signed attestation evidence
+    Azure->>CVM: 4. Signed attestation token
+    CVM->>Edge: 5. Present attestation to edge-fetch server (172.22.218.200:8444)
+    Edge->>Edge: 6. Independently validate evidence and policy
+    Edge->>CVM: 7. Release encrypted envelope + wrapped DEK<br/>(ExpressRoute private path)
+    CVM->>CVM: 8. Decrypt in memory only, process,<br/>re-encrypt with fresh DEK
+    CVM->>EdgeApp: 9. Push re-encrypted result back
+    Edge->>Azure: 10. Deallocate CVM. Zero customer data remains.
 ```
 
-## Cost & Governance
+**Steps 1 and 10 are the entire Azure surface area from the customer's perspective.** Steps 2-4 involve Azure but never touch customer data. Steps 5-9 involve customer data and are gated by the edge alone.
 
-- **Single resource group:** `ACX-HTX` in West US 2
-- **Standard tags on every resource:** `Project=HTX`, `Created By=Michael Godfrey`
-- **All infrastructure as code:** Bicep, version-controlled at [github.com/mgodfre3/ACX-HTX](https://github.com/mgodfre3/ACX-HTX)
-- **Reproducible teardown:** one command removes the environment cleanly
-- **Estimated monthly run cost (idle):** ~$400 (Key Vault Premium keys + CVM stopped + Foundry hub)
+## What is deployed in Azure today (RG `ACX-HTX`)
 
-## Next Steps
+Nothing that stores or protects customer data.
 
-1. **Complete the Azure Local Disconnected Operations bolt-on** (Foundry Local on A100, real BYOK ceremony)
-2. **Schedule Luna HSM procurement + integration** (parallel workstream)
-3. **Present live demo to HTX leadership** — 5 minutes end-to-end
+| Resource | Role in the sovereign story |
+|---|---|
+| Key Vault Premium `acxhtx-kv-aguuve6oq6by6` | Two keys: `htx-kek` (protects the CVM's own OS disk) and `acxhtx-cvm-attestation-key` (gates CVM startup). Neither protects customer application data. |
+| VM `acxhtx-vm` (Trusted Launch, D2as_v5, Windows 2022) | Burst compute stand-in. SEV-SNP is the production target; quota is 0 in westus2 today; TL is the guest-attestation stub Adam approved for the demo. |
+| Foundry hub + project + ACR | Prior work. Not on the burst-CVM demo path. Not sovereign-critical. |
+| **No Storage Account for customer data.** | Deleted 2026-09-09. The Bicep code paths remain, gated behind `deployStorage=false`, so future customer conversations that DO want blob-based flows can re-enable in one line. |
+
+## What runs on-premises (ALDO)
+
+- **HashiCorp Vault** at `172.22.218.200` — the sovereign data-key custodian. Transit key `htx-kek` never leaves this box.
+- **Unwrap service** on `:8443` — attestation-gated DEK release primitive. Reject anything without valid attestation.
+- **Edge fetch server** on `:8444` — attestation-gated envelope release + result store. Never sees plaintext.
+- **Video store** at `/var/lib/edge-fetch/videos/` — encrypted envelopes only, wrapped with `htx-kek`.
+
+Source of truth for both edge services: [`../aldo/edge-fetch/`](../aldo/edge-fetch/).
+Source of truth for the CVM consumer: [`../cvm-app/`](../cvm-app/).
+
+## What the demo proves in 6 minutes
+
+Full storyboard: [`demo-storyboard.md`](demo-storyboard.md). Cheat sheet: [`demo-cheat-sheet.md`](demo-cheat-sheet.md). Design of record: [`burst-cvm-architecture.md`](burst-cvm-architecture.md).
+
+| Property | Evidence on stage |
+|---|---|
+| **The customer's data key is not in Azure.** | Portal: Azure Key Vault Keys blade shows two keys, both explicitly non-data. Left shell: `vault read transit/keys/htx-kek` from the edge. |
+| **No customer data is stored in Azure.** | Portal: RG has zero customer-facing Storage accounts. |
+| **The edge — not Azure — decides who gets the data key.** | Edge fetch server audit log shows the attestation-gated release decision. Log line explicitly labels `STUB` vs `PROD`. |
+| **Data only lives in Azure during a burst.** | CVM disk usage flat during processing. `Get-Volume` on the deallocated CVM fails. Result on edge. |
+| **The customer can kill Azure's access without touching Azure.** | Toggle the edge Vault key. Re-run the burst. Attestation passes; unwrap fails; processing halts. |
+| **Azure can stop the compute; that is all.** | Toggle the Azure Key Vault OS key. CVM cannot boot. Customer data on the edge is unaffected. |
+
+## Deferred to production
+
+- **Real SEV-SNP hardware** — quota request filed for `standardECasv6Family` in `westus2`. Swap is a parameter change; no consumer or edge code changes.
+- **MAA JWT validation in prod attestation mode** — the code path exists and rejects everything as a fail-safe; the specific JWT verification against MAA JWKS is the last piece to wire once SEV-SNP hardware is available.
+- **Customer HSM in place of HashiCorp Vault Transit** — same wire protocol, harder cryptographic backing. No code change on the CVM side.
+
+## Prior iterations preserved
+
+An earlier iteration proposed blob-based transport with a customer-managed key protecting Azure Storage. That flow has been retired at the customer's request. Its Bicep is gated (`deployStorage=false`) so it can be brought back for a different customer conversation without redevelopment.
+
+## What leadership should take away
+
+1. **The trust boundary is cryptographic, not geographic.** Even if Azure Storage or ExpressRoute were compromised, the customer's data would be inert without a key release from the edge.
+2. **The customer holds the kill switch.** Two toggles: one on their edge (immediate data-key denial), one in Azure (compute denial). Both live on stage.
+3. **Azure is elastic capacity, not a custodian.** The commercial appeal is unchanged; the trust posture is inverted.
+4. **The Trusted Launch stub is honest** — every log line says `STUB`. The production upgrade to SEV-SNP is a parameter change, not a redesign.
