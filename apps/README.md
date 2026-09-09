@@ -146,11 +146,26 @@ C:\HTX\consumer\.venv\Scripts\pip install -r apps/consumer/requirements.txt
 $env:HTX_STORAGE_ACCOUNT = 'acxhtxstgaguuve6oq6by6'
 $env:HTX_CONTAINER       = 'sovereign-encrypted'
 $env:HTX_BLOB_NAME       = 'htxaldo-foundry/2026/09/08/<uuid>.envelope.json'
-$env:HTX_UNWRAP_URL      = 'https://172.22.218.201:8443/unwrap'   # unwrap service
+$env:HTX_UNWRAP_URL      = 'http://172.22.218.200:8443/unwrap'   # demo private endpoint
 $env:HTX_UNWRAP_VERIFY_TLS = '0'    # demo only; require cert in prod
 
 C:\HTX\consumer\.venv\Scripts\python apps/consumer/consumer.py
 ```
+
+## Known limitations
+
+- The deployed `acxhtx-vm` is a Windows Server 2022 Trusted Launch VM, not an
+  SEV-SNP CVM. Its IMDS attested-document endpoint returns a signed document
+  whose `signature` field is not a MAA JWT. With `HTX_DEMO_MODE=1`, the unwrap
+  service logs this mismatch as `trusted-launch-demo` and permits the demo
+  flow. Production mode rejects malformed, untrusted, or invalidly signed
+  tokens.
+- The demo unwrap endpoint is HTTP on the private routed network. Production
+  requires TLS with client-certificate authentication.
+- Private DNS did not resolve the storage private endpoint from the ALDO
+  Foundry VM during deployment. The observed endpoint address,
+  `10.255.250.8`, was added to the guest hosts file as a temporary demo
+  workaround.
 
 ## What we upgrade to production
 

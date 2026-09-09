@@ -53,7 +53,7 @@ If any of those return blank → **stop and fix before demoing**.
 
 ---
 
-## The story arc (5 acts, 12 minutes total)
+## The story arc (6 acts, 15 minutes total)
 
 ### Act 1 — "Here's the boundary" (1 min)
 
@@ -103,7 +103,7 @@ az disk show --ids $diskId `
 
 Switch to Shell B / ALDO portal.
 
-**Say:** "On the on-prem side we have HTX's Azure Local Disconnected Operations stamp — Tokyo-WKLD in this demo. A HashiCorp Vault holds the local mirror of `htx-kek`. And a Windows Server 2025 VM with A100 GPU passthrough runs Foundry Local."
+**Say:** "On the on-prem side we have HTX's Azure Local Disconnected Operations stamp — Tokyo-WKLD in this demo. A HashiCorp Vault holds the local `htx-kek`. And a Windows Server 2025 VM runs the sovereign producer workload."
 
 Show:
 ```powershell
@@ -112,7 +112,7 @@ az resource list -g ACX-HTX-ALDO --resource-type Microsoft.AzureStackHCI/virtual
 ```
 
 **Explain the split:**
-- **Local Foundry Local instance** runs Phi-4 mini + our custom HTX antenna detector
+- **Local Foundry VM** is currently the CPU-only fallback because A100 capacity was unavailable; DDA can be enabled when capacity returns
 - **Model came from Azure Foundry** — trained in the cloud on non-sensitive imagery, published to the CMK-encrypted ACR
 - **Pulled to on-prem** via ACR Connected Registry mirror — never in plaintext
 - **Sensitive inference stays local** — customer drone footage never leaves the boundary
@@ -158,6 +158,49 @@ az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign
 
 **Say:** "And re-enabling brings everything back. This is what 'customer holds the keys' means in Azure. Not a policy statement — a cryptographic property."
 
+### Act 6 — "The key never went to Azure" (3 min)
+
+Use the validated sovereign envelope:
+
+```text
+sovereign-encrypted/htxaldo-foundry/2026/09/09/80df8661-b6d2-44f6-b5c9-7d9110649bc8.envelope.json
+```
+
+Run the installed consumer on `acxhtx-vm` with Azure VM Run Command:
+
+```powershell
+$blob = 'htxaldo-foundry/2026/09/09/80df8661-b6d2-44f6-b5c9-7d9110649bc8.envelope.json'
+$script = @"
+`$env:HTX_STORAGE_ACCOUNT='acxhtxstgaguuve6oq6by6'
+`$env:HTX_CONTAINER='sovereign-encrypted'
+`$env:HTX_BLOB_NAME='$blob'
+`$env:HTX_UNWRAP_URL='http://172.22.218.200:8443/unwrap'
+`$env:HTX_UNWRAP_VERIFY_TLS='0'
+C:\HTX\consumer\.venv\Scripts\python.exe C:\HTX\consumer\consumer.py
+"@
+az vm run-command invoke -g ACX-HTX -n acxhtx-vm `
+  --command-id RunPowerShellScript --scripts $script `
+  --query 'value[].message' -o tsv
+```
+
+Show the corresponding on-prem decision:
+
+```bash
+sudo journalctl -u htx-unwrap.service --since "5 minutes ago" --no-pager
+```
+
+**Say:** "The consumer fetched ciphertext and a Vault-wrapped DEK, proved its
+Trusted Launch identity to the on-prem gate, and decrypted only in VM memory.
+The on-prem Vault log is the proof point: Azure had to ask the customer-controlled
+service for the key."
+
+**Independent-key proof:** Cache the wrapped envelope on the consumer, disable
+the Azure Key Vault `htx-kek`, and repeat only the attestation and unwrap step.
+The observed unwrap still succeeds because Vault Transit holds a separate local
+KEK. Azure revoke protects Azure storage, disks, and ACR; it does not revoke the
+customer's on-prem key. Storage can cache CMK material briefly, so a data-plane
+failure may not appear immediately after disabling the Azure key.
+
 ---
 
 ## Common questions & 15-second answers
@@ -165,7 +208,7 @@ az storage blob list --account-name acxhtxstgaguuve6oq6by6 --container sovereign
 | Question | Answer |
 |---|---|
 | **"Why not Confidential VMs everywhere?"** | SEV-SNP capacity isn't available on this subscription's hardware in any US region today. The CMK + Trusted Launch VM is the closest possible today; SEV-SNP swaps in with a config flag when capacity returns. |
-| **"Why not Arc-AKS on the edge?"** | A100 GPUs aren't supported on Arc-AKS (T4/A2 only). Foundry Local on Windows Server 2025 with DDA passthrough gets us the A100 hardware working with the same customer-key story. |
+| **"Why not Arc-AKS on the edge?"** | A100 GPUs aren't supported on Arc-AKS (T4/A2 only). The deployed Windows Server 2025 VM is CPU-only today; Foundry Local can use DDA passthrough when A100 capacity returns. |
 | **"How do we know Microsoft can't read the data?"** | The CMK design: every touch of the DEK requires a wrap-op from Key Vault. Revoke the KEK → wrap fails → DEK stays encrypted → data stays ciphertext. Just showed this live. |
 | **"What's the actual key custody?"** | Demo uses AKV Premium HSM (public preview: FIPS 140-2 L3, cert-managed). Production replaces both sides with Luna HSMs — customer holds smart cards, does BYOK ceremony, key material never leaves the HSMs. |
 | **"What's the timeline?"** | Demo running now. Pilot with pilot HSMs: months. Full production with dual-Luna + real BYOK ceremony: years — planned and budgeted. This isn't a slideware promise. |

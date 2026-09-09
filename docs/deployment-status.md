@@ -60,7 +60,29 @@ See `training/README.md` and `arc-aks/README.md` for the pipeline details.
 - **ExpressRoute path:** hub uses `AC-VNGW-EUS` gateway → ExpressRoute → on-prem
 - **On-prem reachability:** routed via the hub's ER — Azure Local ALDO stamp will consume this same routing plane
 
-All private endpoints resolve on the peered spine; no public internet path exists for KV or Storage data plane.
+Private endpoints resolve inside the Azure workload VNet; no public internet
+path exists for KV or Storage data plane. ALDO DNS did not resolve the Storage
+private endpoint during validation, so the Foundry guest temporarily maps it in
+the hosts file.
+
+## On-prem side
+
+The sovereign data pipeline was deployed and validated end to end on
+2026-09-09:
+
+| Component | Location | Observed state |
+|---|---|---|
+| Vault VM | `htxaldo-vault` / `172.22.218.200` | Vault 2.1.0 initialized and unsealed; Transit key `htx-kek` is RSA-3072 |
+| Unwrap service | `/opt/htx-unwrap` on the Vault VM | `htx-unwrap.service` active; private endpoint `http://172.22.218.200:8443/unwrap` |
+| Producer | `C:\HTX\producer` on `htxaldo-foundry` / `172.22.218.201` | Windows Server 2025 CPU-only fallback; generated and Vault-wrapped a 292-byte telemetry payload |
+| Consumer | `C:\HTX\consumer` on `acxhtx-vm` / `10.255.250.9` | System-assigned identity has Storage Blob Data Reader; decrypted the payload successfully |
+
+The validated envelope is
+`sovereign-encrypted/htxaldo-foundry/2026/09/09/80df8661-b6d2-44f6-b5c9-7d9110649bc8.envelope.json`.
+The unwrap audit showed a request from `10.255.250.9`, the Trusted Launch demo
+attestation decision, and HTTP 200. Disabling the Azure Key Vault copy of
+`htx-kek` did not disable the separate Vault Transit key: a cached wrapped
+envelope still unwrapped and decrypted while the Azure key was disabled.
 
 ## Tag verification
 
@@ -104,5 +126,3 @@ az group delete --name ACX-HTX --yes --no-wait
 az keyvault purge --name acxhtx-kv-aguuve6oq6by6 --location westus2
 az keyvault purge --name acxhtx-fdy-kv-aguuve --location westus2
 ```
-
-

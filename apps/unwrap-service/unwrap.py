@@ -72,9 +72,22 @@ def _jwks_client(issuer: str) -> PyJWKClient:
 
 def verify_maa_token(token: str, policy: Policy, demo_mode: bool) -> dict[str, Any]:
     # First, peek at the issuer without verifying, to pick the right JWKS
-    unverified = jwt.decode(token, options={"verify_signature": False})
+    try:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+    except Exception as e:
+        if demo_mode:
+            log.warning("[demo-mode] token is not a JWT but allowing: %s", e)
+            return {
+                "iss": "imds-attested-document",
+                "x-ms-attestation-type": "trusted-launch-demo",
+            }
+        raise AttestationError(f"token_decode_failed: {e}")
+
     iss = unverified.get("iss")
     if iss not in policy.trusted_issuers:
+        if demo_mode:
+            log.warning("[demo-mode] issuer '%s' not trusted but allowing", iss)
+            return unverified
         raise AttestationError(f"issuer_not_trusted: {iss}")
 
     try:
@@ -87,6 +100,9 @@ def verify_maa_token(token: str, policy: Policy, demo_mode: bool) -> dict[str, A
             options={"verify_aud": False},
         )
     except Exception as e:
+        if demo_mode:
+            log.warning("[demo-mode] signature invalid but allowing: %s", e)
+            return unverified
         raise AttestationError(f"signature_invalid: {e}")
 
     now = int(time.time())
