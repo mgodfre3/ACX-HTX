@@ -1,7 +1,7 @@
 # Deployment Status
 
-**Last deploy:** `acx-htx-foundry-rbac-20260904-2207`  
-**RG:** `ACX-HTX` in West US 2  
+**Last deploy:** `acx-htx-attest-key-20260909-1228` (retire storage plane; add dedicated CVM OS/attestation key)
+**RG:** `ACX-HTX` in West US 2
 **Repo:** https://github.com/mgodfre3/ACX-HTX
 
 ## Deployed and working
@@ -9,19 +9,85 @@
 | Resource | Name | State |
 |---|---|---|
 | Key Vault Premium (HSM-backed) | `acxhtx-kv-aguuve6oq6by6` | ✅ RBAC, firewall Deny + AzureServices bypass, private endpoint |
-| KEK (RSA-HSM 3072) | `htx-kek` | ✅ Backs storage CMK + disk CMK + ACR CMK |
-| Storage Account | `acxhtxstgaguuve6oq6by6` | ✅ CMK active, public access Disabled, private endpoint |
-| Blob container | `sovereign-cold` | ✅ Ready for encrypted envelope drops |
-| User-assigned MI (storage) | `acxhtx-mi-storage` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
+| **Application-data KEK** (RSA-HSM 3072) | `htx-kek` | ✅ Retained for disk CMK + ACR CMK. **No longer used to protect customer application data** — that's the on-prem Vault Transit key, per burst-CVM architecture. |
+| **OS / attestation key** (RSA-HSM 3072) | `acxhtx-cvm-attestation-key` | ✅ **New (2026-09-09).** Dedicated to gating CVM boot / OS attestation. Never touches customer data. Separate from `htx-kek` on purpose so the "AKV key does not hold the data key" story is provable by inspection. Ops: wrapKey / unwrapKey only. |
 | User-assigned MI (ACR) | `acxhtx-acr-mi` | ✅ Key Vault Crypto Service Encryption User on the sovereign vault |
 | Disk Encryption Set | `acxhtx-des` | ✅ System-assigned MI, KEK-rotation enabled |
-| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running, OS disk **CMK-encrypted via customer KEK**, no public IP |
+| **VM (Trusted Launch)** | `acxhtx-vm` (`Standard_D2as_v5`, Windows Server 2022) | ✅ Running (private IP `10.255.250.9`), OS disk **CMK-encrypted via `htx-kek`**, no public IP. Stand-in for the target SEV-SNP CVM; attestation stub lives in the on-prem unwrap service. |
 | **ACR (Premium, CMK-encrypted)** | `acxhtxacraguuve6o` | ✅ Encryption enabled, key `htx-kek`, model registry |
-| **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to storage + KV + ACR + AppInsights |
+| **Foundry hub** | `acxhtx-foundry-hub` | ✅ Kind=Hub, wired to Foundry-side storage + KV + ACR + AppInsights |
 | **Foundry project** | `acxhtx-foundry-proj` | ✅ Kind=Project, child of hub |
 | Foundry associated KV | `acxhtx-fdy-kv-aguuve` | ✅ RBAC-authorized (Foundry uses role assignments, not access policies) |
-| Foundry associated storage | `acxhtxfdystgaguuve6o` | ✅ StorageV2 |
+| Foundry associated storage | `acxhtxfdystgaguuve6o` | ✅ StorageV2 — **isolated to Foundry workspace**, does not hold customer application data |
 | Foundry App Insights | `acxhtx-fdy-ai-aguuve` | ✅ Web kind |
+
+## Retired 2026-09-09 — sovereign storage plane
+
+Per direction change (customer will not store data in Azure), the following resources were **deleted** and gated behind `deployStorage=false` in `infra/main.bicepparam` so future deploys do not recreate them:
+
+| Deleted resource | Notes |
+|---|---|
+| Storage account `acxhtxstgaguuve6oq6by6` | Blob CMK, private endpoint, `sovereign-cold` + `sovereign-encrypted` containers all gone. Account-level soft-delete tombstone exists at subscription scope (Storage RP has no user-callable purge API); tombstone is NOT visible in the RG or portal browse UI. |
+| Private endpoint `acxhtxstgaguuve6oq6by6-blob-pe` | Deleted with the SA. |
+| Event Grid system topic `acxhtxstgaguuve6oq6by6-*` | Deleted with the SA. |
+| UAMI `acxhtx-mi-storage` | Was the storage CMK identity. |
+| UAMI `acxhtx-producer-mi` | Detached from `AdaptiveCloud-Management/ACX-JSW01-WUS2` first, then deleted. |
+
+To re-deploy the storage plane for a different customer conversation, flip `deployStorage = true` in `infra/main.bicepparam` and re-run `az deployment sub create` — all storage code paths are preserved in Bicep, just gated off.
+
+## Pending — AMD Confidential VM (SEV-SNP)
+
+**Requested:** AMD Confidential Compute VM on the existing peered VNet with private-endpoint connectivity.
+**Blocker:** SEV-SNP quota = 0 in `westus2` for this subscription. Reverted to Trusted Launch VM (`deployCmkVm=true`) until quota lands.
+
+Discovery (2026-09-08):
+- westus2 offers **only v6** AMD SEV-SNP families: `standardDCasv6Family`, `standardDCadsv6Family`, `standardECasv6Family`, `standardECadsv6Family` (v5 families are quota-provisioned but the SKUs are not listed in this region — the earlier "DCadsv5 quota 0/100" reading was misleading).
+- All four v6 families currently have `limit = 0` vCPUs.
+- Programmatic quota request via `Microsoft.Quota` REST (`PATCH /quotas/standardECasv6Family = 8`) auto-failed with `QuotaNotAvailableForResource` — needs manual review via a support case.
+
+Current staged state:
+- Bicep code (`infra/modules/cvm.bicep`) targets `Standard_EC2as_v6` (2 vCPU / 16 GB / AMD SEV-SNP / Windows Server 2022) on the existing `AC-Managment-WUS2 / Default` subnet, dynamic private IP only, `securityEncryptionType: 'DiskWithVMGuestState'` OS disk.
+- `infra/main.bicepparam` currently runs the Trusted Launch VM (`deployCvm = false`, `deployCmkVm = true`). To cut over once quota lands: delete `acxhtx-vm` + its NIC + OS disk, flip params (`deployCvm = true`, `deployCmkVm = false`), redeploy.
+
+### Next step — file the quota case
+
+Portal path: **Subscription → Usage + quotas → Request quota increase → Compute-VM (cores) → West US 2 → `Standard ECasv6 Family vCPUs` → set to 8**.
+
+Or CLI (creates a support ticket if the account has a support plan):
+
+```powershell
+az support tickets create `
+  --ticket-name "cvm-quota-standardECasv6Family-westus2" `
+  --title "SEV-SNP quota increase: standardECasv6Family = 8 vCPU in westus2" `
+  --description "Please raise quota for standardECasv6Family from 0 to 8 vCPUs in westus2. Auto-request (Microsoft.Quota REST PATCH) returned QuotaNotAvailableForResource. Subscription: AdaptiveCloudLab (fbaf508b-cb61-4383-9cda-a42bfa0c7bc9). Use case: AMD Confidential VM for sovereign-hybrid demo on peered VNet AC-Managment-WUS2." `
+  --severity moderate `
+  --contact-first-name Michael --contact-last-name Godfrey `
+  --contact-method email --contact-email Michael.Godfrey@adaptivecloudlab.com `
+  --contact-country USA --contact-language en-us --contact-timezone "Pacific Standard Time"
+```
+
+Once approved, deploy:
+
+```powershell
+$env:CVM_ADMIN_PASSWORD = '<strong-password>'
+az deployment sub create `
+  --location westus2 `
+  --template-file infra/main.bicep `
+  --parameters infra/main.bicepparam `
+  --name "acx-htx-cvm-$(Get-Date -Format yyyyMMdd-HHmm)"
+```
+
+### Known follow-up: CMK on the CVM OS disk
+
+`cvm.bicep` currently uses `securityEncryptionType: 'DiskWithVMGuestState'` (platform-managed key for the guest-state blob, platform key for the OS disk). To get the "revoke KEK → CVM disk unreadable" behavior the demo advertises, upgrade to `DiskWithVMGuestStateCMK` backed by a **Confidential** Disk Encryption Set (`encryptionType: 'ConfidentialVmEncryptedWithCustomerKey'`) against a KEK that has a Secure Key Release (SKR) policy attached. `htx-kek` does not currently have an SKR policy, so this needs a KEK rotation planned alongside the demo cutover.
+
+
+## Producer identity — RETIRED 2026-09-09
+
+Previously described a UAMI `acxhtx-producer-mi` attached to the jump host `ACX-JSW01-WUS2` with Storage Blob Data Contributor scoped to the `sovereign-encrypted` container. **All three (UAMI, role assignment, container) were deleted as part of the sovereign-storage-plane retirement.** See "Retired 2026-09-09 — sovereign storage plane" above for the full list.
+
+The Bicep code for this identity still exists in `infra/modules/identity.bicep` behind the `deployStorageIdentities` conditional (driven by the top-level `deployStorage` toggle). If a future customer conversation requires the blob flow, flip `deployStorage = true` in `infra/main.bicepparam` and it comes back.
+
 
 ## Key custody proof (three levels, one key)
 

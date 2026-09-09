@@ -16,6 +16,9 @@ param kekName string
 @description('User-assigned MI resource ID used for storage CMK.')
 param storageIdentityId string
 
+@description('Principal ID of the producer user-assigned MI. Granted Storage Blob Data Contributor scoped ONLY to the sovereign-encrypted container.')
+param producerIdentityPrincipalId string
+
 @description('Subnet resource ID for the private endpoint.')
 param workloadSubnetId string
 
@@ -89,6 +92,29 @@ resource coldContainer 'Microsoft.Storage/storageAccounts/blobServices/container
   }
 }
 
+// Landing container for encrypted envelopes produced by the sovereign producer job.
+resource encryptedContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: 'sovereign-encrypted'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+// Storage Blob Data Contributor scoped to just the sovereign-encrypted container.
+// Producer MI can PUT envelopes here but has NO access to sovereign-cold or any other container.
+var roleStorageBlobDataContributor = '/subscriptions/${subscription().subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+
+resource producerContainerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: encryptedContainer
+  name: guid(encryptedContainer.id, producerIdentityPrincipalId, 'blob-data-contributor')
+  properties: {
+    roleDefinitionId: roleStorageBlobDataContributor
+    principalId: producerIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource pe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
   name: peName
   location: location
@@ -112,4 +138,5 @@ resource pe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
 output storageAccountName string = storage.name
 output storageAccountId string = storage.id
 output coldContainerName string = coldContainer.name
+output encryptedContainerName string = encryptedContainer.name
 output privateEndpointId string = pe.id

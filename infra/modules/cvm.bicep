@@ -17,8 +17,8 @@ param adminPassword string
 @description('Subnet resource ID (existing) for the CVM NIC.')
 param workloadSubnetId string
 
-@description('Confidential VM size (AMD SEV-SNP).')
-param vmSize string = 'Standard_EC2as_v5'
+@description('Confidential VM size (AMD SEV-SNP). westus2 only offers v6 (DCasv6/DCadsv6/ECasv6/ECadsv6); v5 SKUs are not listed in this region.')
+param vmSize string = 'Standard_EC2as_v6'
 
 var vmName = '${namePrefix}-cvm'
 var nicName = '${vmName}-nic'
