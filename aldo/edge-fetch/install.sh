@@ -21,12 +21,22 @@ ALLOWED_ARM_IDS="${ALLOWED_ARM_IDS:-/subscriptions/fbaf508b-cb61-4383-9cda-a42bf
 # prod  — requires SEV-SNP (rejects everything until SEV-SNP validation is wired)
 ATTESTATION_MODE="${ATTESTATION_MODE:-stub}"
 
+# Vault token used by edge-fetch to proxy Transit encrypt/decrypt for /wrap and /unwrap.
+# Must have policy allowing encrypt+decrypt on transit/keys/htx-kek.
+# The producer token from vault-app-tokens.json is a fine choice; the unwrap
+# token is another. NEVER pass the Vault root token here.
+VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required — provide a Vault token with transit encrypt+decrypt on htx-kek}"
+VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+VAULT_TRANSIT_KEY="${VAULT_TRANSIT_KEY:-htx-kek}"
+
 echo "== install root      : $INSTALL_ROOT"
 echo "== storage root      : $STORAGE_ROOT"
 echo "== service user      : $SERVICE_USER"
 echo "== listen            : $LISTEN_ADDR"
 echo "== attestation mode  : $ATTESTATION_MODE"
 echo "== allowed ARM IDs   : $ALLOWED_ARM_IDS"
+echo "== vault addr        : $VAULT_ADDR"
+echo "== vault transit key : $VAULT_TRANSIT_KEY"
 
 # --- system user + storage ---
 
@@ -68,6 +78,9 @@ Environment=EDGE_FETCH_STORAGE_ROOT=$STORAGE_ROOT
 Environment=EDGE_FETCH_ALLOWED_ARM_IDS=$ALLOWED_ARM_IDS
 Environment=EDGE_FETCH_ATTESTATION_MODE=$ATTESTATION_MODE
 Environment=EDGE_FETCH_UNWRAP_URL=http://127.0.0.1:8443/unwrap
+Environment=EDGE_FETCH_VAULT_ADDR=$VAULT_ADDR
+Environment=EDGE_FETCH_VAULT_TOKEN=$VAULT_TOKEN
+Environment=EDGE_FETCH_VAULT_TRANSIT_KEY=$VAULT_TRANSIT_KEY
 ExecStart=$INSTALL_ROOT/venv/bin/uvicorn edge_fetch.server:app --host $LISTEN_HOST --port $LISTEN_PORT --log-level info
 Restart=on-failure
 RestartSec=5s

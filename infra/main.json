@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "3405600966791053467"
+      "templateHash": "6191188923916198875"
     }
   },
   "parameters": {
@@ -153,7 +153,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.42.1.51946",
-              "templateHash": "7027463425415957302"
+              "templateHash": "13469581441939263699"
             }
           },
           "parameters": {
@@ -228,7 +228,7 @@
               "type": "Microsoft.KeyVault/vaults/keys",
               "apiVersion": "2024-04-01-preview",
               "name": "[format('{0}/{1}', variables('vaultName'), parameters('kekName'))]",
-              "tags": "[parameters('tags')]",
+              "tags": "[union(parameters('tags'), createObject('Purpose', 'osdisk-and-acr-cmk', 'Not-Used-For', 'customer-application-data', 'Customer-Data-Key-Location', 'on-prem Vault Transit (172.22.218.200)'))]",
               "properties": {
                 "kty": "RSA-HSM",
                 "keySize": 3072,

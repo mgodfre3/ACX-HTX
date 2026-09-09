@@ -30,12 +30,12 @@ Pre-warm the CVM by starting and stopping it once so first-boot delays don't sho
 | Step | Action | On-stage line |
 |---|---|---|
 | 1 | Left shell: `ls /var/lib/edge-fetch/videos/`. Shows one directory `sample-video-01/` containing `envelope.json`. | *"This is the customer's data. It's encrypted. It lives here, on their edge."* |
-| 2 | Left shell: `cat /var/lib/edge-fetch/videos/sample-video-01/envelope.json \| jq '.kek_ref, .wrap_algo'`. Shows `"transit/keys/htx-kek"` and `"vault-transit-rsa-oaep-256"`. | *"The key that can unlock it lives in a Vault instance right next to it. This key has never been in Azure. It never will be."* |
+| 2 | Left shell: `cat /var/lib/edge-fetch/videos/sample-video-01/envelope.json \| jq '.kek_ref, .wrap_algo'`. Shows `"transit/keys/htx-kek"` and `"vault-transit-aes256gcm96"` (Vault Transit is symmetric — that's the expected label). | *"The key that can unlock it lives in a Vault instance right next to it. This key has never been in Azure. It never will be."* |
 | 3 | Left shell: `vault read transit/keys/htx-kek \| head -20`. Confirms the key exists locally. | *"Same customer, same data center, same physical enclosure."* |
 | 4 | Browser tab 1 (RG `ACX-HTX`): scroll. | *"Now let's look at what's in Azure."* |
 | 5 | Point at resource list: Key Vault, a VM, the Foundry hub. **No storage account visible.** (Foundry-internal `acxhtxfdystgaguuve6o` may show — call it out: *"That storage belongs to Azure AI Foundry's workspace. It contains no customer data. Zero customer bytes are stored in Azure."*) | *"There is nothing here that says 'customer data'."* |
 | 6 | Browser tab 2 (Key Vault → Keys): show the two keys. Click into `acxhtx-cvm-attestation-key`, show tag `Purpose: cvm-os-attestation`, key ops `wrapKey, unwrapKey` only. | *"This is Azure's key. It gates whether the CVM can boot. It cannot decrypt customer data. Different key, different vault instance, different purpose."* |
-| 7 | Click into `htx-kek` in the same portal blade. | *"This key is a leftover from a prior demo. It protects the CVM's OS disk. It doesn't protect customer data either — the customer's data key is on the edge Vault we just looked at."* |
+| 7 | Click into `htx-kek` in the same portal blade. Show the **Tags panel** first — three explicit tags: `Purpose=osdisk-and-acr-cmk`, `Not-Used-For=customer-application-data`, `Customer-Data-Key-Location=on-prem Vault Transit (172.22.218.200)`. Then show the key ops. | *"This key shares a name with the on-prem data key by historical accident — you'll notice we've tagged it explicitly to prevent that confusion. Its actual job is encrypting the CVM's own OS disk and the container registry. The tag `Customer-Data-Key-Location` points reviewers at the on-prem Vault we just looked at. Azure does not have a copy."* |
 
 ---
 
@@ -108,7 +108,7 @@ Pre-warm the CVM by starting and stopping it once so first-boot delays don't sho
 | Step | Action | On-stage line |
 |---|---|---|
 | 1 | Right shell: `.\demo-toggle-azurekek.ps1 -Disable`. Banner: `!!! AZURE KEY VAULT: acxhtx-cvm-attestation-key DISABLED !!!`. | *"Now Microsoft is denying startup. Different toggle. Different outcome."* |
-| 2 | Right shell: `.\scripts\demo-burst.ps1 -Video sample-video-01`. CVM start attempt. **VM boot stalls / attestation fails.** (For the TL stub we simulate by having the orchestrator call the attestation-key wrap operation as a preflight; the 403 gives us the same visible effect without needing a real Confidential DES.) | *"Azure can stop the compute. That's the extent of Azure's power in this design."* |
+| 2 | Right shell: `.\scripts\demo-burst.ps1 -Video sample-video-01`. **Orchestrator preflights `az keyvault key encrypt` against the disabled key, gets a 403, and aborts before even calling `az vm start`.** Banner: `AZURE KV OS ATTESTATION GATE: DENIED`. On stage: this is exactly what a real SEV-SNP Confidential DES would do at boot time — same failure, one code level earlier. | *"Azure can stop the compute. That's the extent of Azure's power in this design."* |
 | 3 | Right shell: `.\demo-toggle-azurekek.ps1 -Enable`. Banner: `--- AZURE KEY VAULT: acxhtx-cvm-attestation-key RESTORED ---`. | (Reset.) |
 
 ---

@@ -136,7 +136,30 @@ if ($Reset) {
 
 # --- Burst path ---
 Write-Banner "BURST: video=$Video" Green
-Write-Host "Step 1/5 : Ensure CVM is running"
+Write-Host "Step 1/6 : Preflight attestation-gate on Azure Key Vault"
+# Toggle B — Azure key kill switch — is observable HERE. If the operator has
+# disabled acxhtx-cvm-attestation-key via demo-toggle-azurekek.ps1, this preflight
+# gets a 403 from AKV and the orchestrator aborts before starting the VM. This is
+# how "Azure can stop the compute" is proven on-stage against a Trusted Launch
+# stand-in; a real SEV-SNP CVM using a Confidential DES against this key would
+# fail during boot itself.
+$attestKeyVault = 'acxhtx-kv-aguuve6oq6by6'
+$attestKeyName  = 'acxhtx-cvm-attestation-key'
+$preflight = az keyvault key encrypt `
+  --vault-name $attestKeyVault --name $attestKeyName `
+  --algorithm RSA-OAEP-256 --value (New-Guid).Guid.Substring(0,16) `
+  --data-type plaintext --query 'result' -o tsv 2>&1
+if ($LASTEXITCODE -ne 0) {
+  Write-Banner "AZURE KV OS ATTESTATION GATE: DENIED" Red
+  Write-Host "  Preflight against key '$attestKeyName' failed:"
+  Write-Host "  $preflight" -ForegroundColor Red
+  Write-Host "  Aborting. The Azure Key Vault OS attestation key is disabled or unreachable."
+  Write-Host "  Restore with:  .\scripts\demo-toggle-azurekek.ps1 -Enable"
+  return
+}
+Write-Host "  Attestation gate PASSED. Continuing." -ForegroundColor Green
+
+Write-Host "`nStep 2/6 : Ensure CVM is running"
 $state = Get-VmPowerState
 if ($state -ne 'VM running') {
   Write-Host "  CVM state = $state; starting..."
@@ -146,7 +169,7 @@ if ($state -ne 'VM running') {
   Write-Host "  Already running."
 }
 
-Write-Host "`nStep 2/5 : Invoke burst_consumer on CVM (this streams stdout back)"
+Write-Host "`nStep 3/6 : Invoke burst_consumer on CVM (this streams stdout back)"
 $runScript = @"
 C:\HTX\burst-consumer\run.cmd --video-id $Video
 "@
@@ -165,10 +188,10 @@ if ($lastJson) {
   Write-Host "  $lastJson"
 }
 
-Write-Host "`nStep 3/5 : Poll edge audit tail"
+Write-Host "`nStep 4/6 : Poll edge audit tail"
 Tail-EdgeAudit -N 8
 
-Write-Host "`nStep 4/5 : Confirm result envelope landed"
+Write-Host "`nStep 5/6 : Confirm result envelope landed"
 try {
   $probe = Invoke-RestMethod -Uri "$EdgeFetchUrl/healthz" -Method GET -TimeoutSec 5
   Write-Host "  edge-fetch healthz: $($probe | ConvertTo-Json -Compress)"
@@ -177,11 +200,11 @@ try {
 }
 
 if ($DeallocateWhenDone) {
-  Write-Host "`nStep 5/5 : Deallocate CVM"
+  Write-Host "`nStep 6/6 : Deallocate CVM"
   az vm deallocate -g $ResourceGroup -n $VmName --no-wait
   Write-Host "  Deallocation dispatched."
 } else {
-  Write-Host "`nStep 5/5 : Leaving CVM running (-DeallocateWhenDone=`$false)"
+  Write-Host "`nStep 6/6 : Leaving CVM running (-DeallocateWhenDone=`$false)"
 }
 
 Write-Banner "BURST COMPLETE" Green

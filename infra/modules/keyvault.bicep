@@ -44,7 +44,17 @@ resource vault 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
 resource kek 'Microsoft.KeyVault/vaults/keys@2024-04-01-preview' = {
   parent: vault
   name: kekName
-  tags: tags
+  tags: union(tags, {
+    // NOTE: This key shares a name with the on-prem Vault Transit key by
+    // historical accident. It protects only the burst CVM's OS disk (via the
+    // Disk Encryption Set) and Azure Container Registry storage. It does NOT
+    // protect customer application data. The Act 1 demo walkthrough points at
+    // these tags to prove this. See docs/demo-storyboard.md and
+    // docs/burst-cvm-architecture.md for the sovereignty narrative.
+    Purpose: 'osdisk-and-acr-cmk'
+    'Not-Used-For': 'customer-application-data'
+    'Customer-Data-Key-Location': 'on-prem Vault Transit (172.22.218.200)'
+  })
   properties: {
     kty: 'RSA-HSM'
     keySize: 3072

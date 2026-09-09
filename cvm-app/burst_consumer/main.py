@@ -6,16 +6,13 @@ End-to-end flow (matches Acts 3-5 in docs/demo-storyboard.md):
   1. Build attestation evidence (stub IMDS or SEV-SNP MAA).
   2. POST /video/{id} to the edge fetch server with the evidence -> receive
      encrypted envelope + wrapped DEK.
-  3. POST to the edge unwrap service (:8443/unwrap) with the wrapped DEK to
-     recover the raw DEK. This is the moment the edge decides "yes, this
-     attested CVM may see plaintext."
+  3. POST /unwrap to the same edge server with the wrapped DEK to recover the
+     raw DEK. The edge decides "yes, this attested CVM may see plaintext."
   4. AES-256-GCM decrypt the payload in memory.
   5. "Process" — count bytes/frames, compute SHA-256, extract 1 thumbnail
      (best-effort; falls back to bytes-in / bytes-out if OpenCV isn't installed).
-  6. Generate a fresh DEK; encrypt the result with it; wrap the new DEK by
-     calling Vault Transit `encrypt` via the unwrap service's companion endpoint
-     (:8443/wrap). If that companion doesn't exist yet we PUT the raw DEK ONLY
-     through the same unwrap-service session under a different action verb.
+  6. Generate a fresh DEK; encrypt the result with it; POST /wrap for a fresh
+     Vault Transit ciphertext of the new DEK.
   7. POST /processed/{id} to the edge fetch server with the fresh envelope.
   8. Zeroize everything. Exit.
 
@@ -24,7 +21,12 @@ it directly for the on-stage overlay.
 
 Environment variables:
   BURST_CONSUMER_EDGE_FETCH_URL       required, e.g. http://172.22.218.200:8444
-  BURST_CONSUMER_EDGE_UNWRAP_URL      required, e.g. http://172.22.218.200:8443
+                                      The edge-fetch server proxies fetch, wrap,
+                                      unwrap, and result storage on a single port.
+  BURST_CONSUMER_EDGE_UNWRAP_URL      optional; defaults to EDGE_FETCH_URL. Only
+                                      set this if you are still running a
+                                      legacy split-server layout with unwrap on
+                                      a different port.
   BURST_CONSUMER_ATTESTATION_MODE     "stub-tl-imds" (default) or "sev-snp"
 
 CLI:
@@ -53,7 +55,11 @@ from . import attestation
 # -------------------------- config --------------------------
 
 EDGE_FETCH_URL = os.environ.get("BURST_CONSUMER_EDGE_FETCH_URL", "").rstrip("/")
-EDGE_UNWRAP_URL = os.environ.get("BURST_CONSUMER_EDGE_UNWRAP_URL", "").rstrip("/")
+# The edge-fetch server (:8444) proxies both wrap and unwrap now (see
+# aldo/edge-fetch/edge_fetch/server.py). The old separate unwrap-service URL is
+# kept as a fallback for environments where the split-server layout is still
+# deployed, but the primary path is single-URL edge-fetch.
+EDGE_UNWRAP_URL = os.environ.get("BURST_CONSUMER_EDGE_UNWRAP_URL", EDGE_FETCH_URL).rstrip("/")
 ATTESTATION_MODE = os.environ.get("BURST_CONSUMER_ATTESTATION_MODE", "stub-tl-imds")
 
 # -------------------------- logging --------------------------
@@ -108,45 +114,35 @@ def fetch_envelope(video_id: str, att: attestation.AttestationEnvelope) -> dict[
 
 def unwrap_dek(wrapped_dek_b64: str, att: attestation.AttestationEnvelope) -> bytes:
     """
-    Ask the edge unwrap service to reverse the Vault Transit ciphertext.
+    Ask the edge to reverse the Vault Transit ciphertext.
 
-    The wire shape of the existing unwrap service (documented in the ALDO deploy
-    notes checked into git commit history) is roughly:
-
+    Wire shape (matches aldo/edge-fetch/edge_fetch/server.py :: /unwrap):
       POST /unwrap
         { "attestation": {...}, "wrapped_dek": "vault:v1:..." }
-        -> 200 { "dek_b64": "<32 bytes base64>" }
-        -> 403 { "error": "..." }
-
-    If your unwrap service uses a different field name for the wrapped DEK,
-    adjust the key below.
+        -> 200 { "dek_b64": "...", "audit_id": "..." }
+        -> 403 { "detail": "key-min-version-not-met" }  (Toggle A tripped)
+        -> 403 { "detail": "<attestation-reason>" }
     """
     url = f"{EDGE_UNWRAP_URL}/unwrap"
-    body = {
-        "attestation": att.as_dict(),
-        "wrapped_dek": wrapped_dek_b64,
-    }
+    body = {"attestation": att.as_dict(), "wrapped_dek": wrapped_dek_b64}
     r = httpx.post(url, json=body, timeout=10.0)
     if r.status_code != 200:
         raise RuntimeError(f"unwrap failed: {r.status_code} {r.text}")
-    data = r.json()
-    return base64.b64decode(data["dek_b64"])
+    return base64.b64decode(r.json()["dek_b64"])
 
 
 def wrap_dek(dek: bytes, att: attestation.AttestationEnvelope) -> str:
     """
     Ask the edge to wrap a fresh DEK for the return leg.
 
-    Uses a companion /wrap route on the unwrap service. If that route doesn't
-    exist in the current unwrap-service build, this call fails and the return
-    leg is aborted. In that case, add the /wrap route to the unwrap service
-    (thin wrapper around Vault Transit `encrypt`).
+    Wire shape (matches aldo/edge-fetch/edge_fetch/server.py :: /wrap):
+      POST /wrap
+        { "attestation": {...}, "dek_b64": "<32 bytes b64>" }
+        -> 200 { "wrapped_dek": "vault:v1:...", "audit_id": "..." }
+        -> 403 { "detail": "<attestation-reason>" }
     """
     url = f"{EDGE_UNWRAP_URL}/wrap"
-    body = {
-        "attestation": att.as_dict(),
-        "dek_b64": base64.b64encode(dek).decode("ascii"),
-    }
+    body = {"attestation": att.as_dict(), "dek_b64": base64.b64encode(dek).decode("ascii")}
     r = httpx.post(url, json=body, timeout=10.0)
     if r.status_code != 200:
         raise RuntimeError(f"wrap failed: {r.status_code} {r.text}")
@@ -235,8 +231,8 @@ def zeroize(*buffers: bytearray) -> None:
 def run(video_id: str, result_id: str | None) -> int:
     _configure_logging()
 
-    if not EDGE_FETCH_URL or not EDGE_UNWRAP_URL:
-        log_evt("config_error", reason="BURST_CONSUMER_EDGE_FETCH_URL and BURST_CONSUMER_EDGE_UNWRAP_URL are required")
+    if not EDGE_FETCH_URL:
+        log_evt("config_error", reason="BURST_CONSUMER_EDGE_FETCH_URL is required")
         return 2
 
     result_id = result_id or f"{video_id}-{int(time.time())}"

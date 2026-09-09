@@ -78,6 +78,17 @@ POST /video/{video_id}
   -> 403 { reason }
   -> 404 { reason: "video-not-found" }
 
+POST /unwrap
+  { "attestation": {...}, "wrapped_dek": "vault:v1:..." }
+  -> 200 { dek_b64, audit_id }
+  -> 403 { detail: "key-min-version-not-met" }        # Toggle A tripped
+  -> 403 { detail: "<attestation-reason>" }
+
+POST /wrap
+  { "attestation": {...}, "dek_b64": "<32 bytes b64>" }
+  -> 200 { wrapped_dek: "vault:v1:...", audit_id }
+  -> 403 { detail: "<attestation-reason>" }
+
 POST /processed/{result_id}
   { "attestation": {...}, "envelope": {...} }
   -> 201 { stored_path, audit_id }
@@ -88,8 +99,15 @@ GET /healthz
 GET /audit/tail?n=20
 ```
 
+## Vault token
+
+The server proxies wrap/unwrap to Vault Transit, so it needs a token with `encrypt` and `decrypt` policy on `transit/keys/htx-kek`. Supply it via `VAULT_TOKEN` when running `install.sh`. **Never pass the Vault root token here** — use the producer token from `vault-app-tokens.json` (`5YxsbRmtndcZgfNfVbi16TM3` in your session) or a purpose-scoped token.
+
+## Fail-closed guard
+
+If `EDGE_FETCH_ALLOWED_ARM_IDS` is unset or empty, the server refuses to start. Set it via `install.sh`'s `ALLOWED_ARM_IDS` env, or explicitly opt into a development wildcard mode by exporting `EDGE_FETCH_ALLOW_EMPTY_ALLOWLIST=1` (do not do this in the demo).
+
 ## Security notes
 
-- The server never touches plaintext customer data. It serves encrypted envelopes and stores encrypted envelopes.
-- The wrapped DEK returned by `GET /video/{id}` remains a Vault Transit ciphertext (`vault:v1:...`) — actually unwrapping it requires a separate call to the existing unwrap service on `:8443`, which enforces its own attestation-gated policy.
-- Disabling the Vault Transit `htx-kek` key from the edge Vault CLI causes any future unwrap call to fail without touching this server. That is the intended kill switch.
+- The server never touches plaintext customer application data. It serves encrypted envelopes and stores encrypted envelopes. Plaintext DEK bytes cross the wire only inside `/unwrap` and `/wrap` responses, and only to attested callers.
+- Disabling the Vault Transit `htx-kek` key from the edge Vault CLI causes `/unwrap` to fail 403. That is the intended Toggle A kill switch. `/video/` and `/processed/` continue to work — the customer keeps ownership of the envelopes; just no one can decrypt them.

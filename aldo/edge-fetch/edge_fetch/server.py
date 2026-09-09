@@ -20,6 +20,7 @@ script produces and the burst_consumer expects.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -43,6 +44,32 @@ ALLOWED_ARM_IDS = [
     s.strip().lower() for s in os.environ.get("EDGE_FETCH_ALLOWED_ARM_IDS", "").split(",") if s.strip()
 ]
 MODE = os.environ.get("EDGE_FETCH_ATTESTATION_MODE", "stub").lower()
+
+# Vault Transit config — this server proxies wrap/unwrap so the burst CVM never
+# has to talk to a second endpoint.
+VAULT_ADDR = os.environ.get("EDGE_FETCH_VAULT_ADDR", "http://127.0.0.1:8200")
+VAULT_TOKEN = os.environ.get("EDGE_FETCH_VAULT_TOKEN", "")
+VAULT_TRANSIT_KEY = os.environ.get("EDGE_FETCH_VAULT_TRANSIT_KEY", "htx-kek")
+
+# Fail-closed guard: refuse to accept an empty allow-list unless the operator has
+# explicitly opted in. This closes the "silent bypass on unset env var" bug the
+# code-review agent flagged 2026-09-09.
+ALLOW_EMPTY_ALLOWLIST = os.environ.get("EDGE_FETCH_ALLOW_EMPTY_ALLOWLIST", "").strip() == "1"
+if not ALLOWED_ARM_IDS and not ALLOW_EMPTY_ALLOWLIST:
+    raise RuntimeError(
+        "EDGE_FETCH_ALLOWED_ARM_IDS is empty. "
+        "Any attester would be accepted. Set EDGE_FETCH_ALLOW_EMPTY_ALLOWLIST=1 "
+        "to explicitly permit this (development only), or provide a comma-separated "
+        "list of ARM resource IDs."
+    )
+if MODE not in {"stub", "prod"}:
+    raise RuntimeError(f"EDGE_FETCH_ATTESTATION_MODE must be 'stub' or 'prod', got {MODE!r}")
+if not VAULT_TOKEN:
+    raise RuntimeError(
+        "EDGE_FETCH_VAULT_TOKEN is empty. "
+        "The edge-fetch server proxies wrap/unwrap to Vault Transit and needs a token "
+        "with encrypt+decrypt on transit/keys/" + VAULT_TRANSIT_KEY + "."
+    )
 
 VIDEOS_DIR = STORAGE_ROOT / "videos"
 PROCESSED_DIR = STORAGE_ROOT / "processed"
@@ -87,6 +114,16 @@ class Envelope(BaseModel):
 class StoreRequest(BaseModel):
     attestation: AttestationPayload
     envelope: Envelope
+
+
+class UnwrapRequest(BaseModel):
+    attestation: AttestationPayload
+    wrapped_dek: str = Field(..., description="Vault Transit ciphertext, e.g. 'vault:v1:...'")
+
+
+class WrapRequest(BaseModel):
+    attestation: AttestationPayload
+    dek_b64: str = Field(..., description="base64 of a 32-byte DEK")
 
 
 # -------------------------- helpers --------------------------
@@ -134,7 +171,114 @@ async def healthz() -> dict:
         "unwrap_service": "reachable" if unwrap_reachable else "unreachable",
         "storage_root": str(STORAGE_ROOT),
         "allowed_arm_id_count": len(ALLOWED_ARM_IDS),
+        "vault_transit_key": VAULT_TRANSIT_KEY,
     }
+
+
+# -------------------------- vault transit proxy --------------------------
+
+
+async def _vault_encrypt(dek: bytes) -> str:
+    """Call Vault Transit `encrypt` and return the `vault:v1:...` ciphertext."""
+    url = f"{VAULT_ADDR.rstrip('/')}/v1/transit/encrypt/{VAULT_TRANSIT_KEY}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.post(
+            url,
+            headers={"X-Vault-Token": VAULT_TOKEN},
+            json={"plaintext": base64.b64encode(dek).decode("ascii")},
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"vault-encrypt-failed:{r.status_code}")
+    return r.json()["data"]["ciphertext"]
+
+
+async def _vault_decrypt(wrapped: str) -> bytes:
+    """Call Vault Transit `decrypt`. Raises 403 on Vault refusal (kill-switch trip)."""
+    url = f"{VAULT_ADDR.rstrip('/')}/v1/transit/decrypt/{VAULT_TRANSIT_KEY}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.post(
+            url,
+            headers={"X-Vault-Token": VAULT_TOKEN},
+            json={"ciphertext": wrapped},
+        )
+    if r.status_code == 403:
+        raise HTTPException(status_code=403, detail="vault-decrypt-denied")
+    if r.status_code != 200:
+        # Vault surfaces 400 when the key version is below min_decryption_version --
+        # i.e., Toggle A tripped. Return 403 to the caller so the demo shows the
+        # kill-switch on the CVM log directly.
+        detail = f"vault-decrypt-failed:{r.status_code}"
+        try:
+            errors = r.json().get("errors", [])
+            if any("min_decryption_version" in e for e in errors):
+                raise HTTPException(status_code=403, detail="key-min-version-not-met")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=detail)
+    return base64.b64decode(r.json()["data"]["plaintext"])
+
+
+@app.post("/unwrap")
+async def unwrap(req: UnwrapRequest, request: Request) -> dict:
+    """
+    Attestation-gated unwrap. Reverses a Vault Transit ciphertext back to raw DEK
+    bytes. Only callers whose attestation validates get the plaintext DEK.
+    """
+    peer = request.client.host if request.client else "unknown"
+    result = _validate_attestation(req.attestation)
+    if not result.ok:
+        _audit("unwrap_denied", reason=result.reason, arm_id=req.attestation.expected_arm_id, peer=peer)
+        raise HTTPException(status_code=403, detail=result.reason)
+
+    dek = await _vault_decrypt(req.wrapped_dek)
+    audit_id = _audit(
+        "unwrap_granted",
+        arm_id=req.attestation.expected_arm_id.lower(),
+        stub_indicator=result.stub_indicator,
+        peer=peer,
+    )
+    log.info(
+        "UNWRAP arm_id=%s mode=%s stub=%s peer=%s audit=%s",
+        req.attestation.expected_arm_id, MODE, result.stub_indicator, peer, audit_id,
+    )
+    return {"dek_b64": base64.b64encode(dek).decode("ascii"), "audit_id": audit_id}
+
+
+@app.post("/wrap")
+async def wrap(req: WrapRequest, request: Request) -> dict:
+    """
+    Attestation-gated wrap. Encrypts an incoming DEK under the Vault Transit key
+    so the caller (typically the CVM producing a re-encrypted result) can carry
+    an opaque ciphertext back to the edge without ever holding the KEK.
+    """
+    peer = request.client.host if request.client else "unknown"
+    result = _validate_attestation(req.attestation)
+    if not result.ok:
+        _audit("wrap_denied", reason=result.reason, arm_id=req.attestation.expected_arm_id, peer=peer)
+        raise HTTPException(status_code=403, detail=result.reason)
+
+    try:
+        dek = base64.b64decode(req.dek_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="dek-b64-not-decodable")
+    if len(dek) not in (16, 24, 32):
+        raise HTTPException(status_code=400, detail="dek-length-not-aes-legal")
+
+    wrapped = await _vault_encrypt(dek)
+    audit_id = _audit(
+        "wrap_granted",
+        arm_id=req.attestation.expected_arm_id.lower(),
+        stub_indicator=result.stub_indicator,
+        dek_bytes=len(dek),
+        peer=peer,
+    )
+    log.info(
+        "WRAP arm_id=%s mode=%s stub=%s dek_bytes=%d peer=%s audit=%s",
+        req.attestation.expected_arm_id, MODE, result.stub_indicator, len(dek), peer, audit_id,
+    )
+    return {"wrapped_dek": wrapped, "audit_id": audit_id}
 
 
 @app.post("/video/{video_id}")
