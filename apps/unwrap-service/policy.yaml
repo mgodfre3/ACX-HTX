@@ -1,0 +1,21 @@
+# HTX Sovereign Unwrap Service policy.
+# Loaded at startup. Changes require service restart.
+
+trusted_issuers:
+  - https://sharedwus.wus.attest.azure.net
+  - https://sharedwus2.wus2.attest.azure.net
+  - https://sharedwus3.wus3.attest.azure.net
+  - https://sharedeus.eus.attest.azure.net
+  - https://sharedeus2.eus2.attest.azure.net
+  - https://shareduks.uks.attest.azure.net
+
+allowed_tee_types:
+  - sevsnpvm
+  - tdxvm
+  - tpm     # Trusted Launch - keep only for demo, remove for production
+
+require_compliance_status: null
+
+allowed_vm_ids: []
+
+max_token_age_seconds: 300
