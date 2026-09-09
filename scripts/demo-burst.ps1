@@ -139,25 +139,35 @@ Write-Banner "BURST: video=$Video" Green
 Write-Host "Step 1/6 : Preflight attestation-gate on Azure Key Vault"
 # Toggle B — Azure key kill switch — is observable HERE. If the operator has
 # disabled acxhtx-cvm-attestation-key via demo-toggle-azurekek.ps1, this preflight
-# gets a 403 from AKV and the orchestrator aborts before starting the VM. This is
-# how "Azure can stop the compute" is proven on-stage against a Trusted Launch
-# stand-in; a real SEV-SNP CVM using a Confidential DES against this key would
-# fail during boot itself.
+# sees enabled=false and aborts before starting the VM.
+#
+# We use the ARM control plane (Microsoft.KeyVault/vaults/keys GET) instead of
+# the data-plane `az keyvault key show` because:
+#   - The vault firewall (Deny + AzureServices bypass) blocks arbitrary data-plane
+#     callers, but the ARM control plane bypasses it entirely.
+#   - The attestation key is provisioned with keyOps=[wrapKey,unwrapKey] only, so
+#     an `encrypt` preflight would 403 regardless of enabled state.
+$sub            = az account show --query id -o tsv
 $attestKeyVault = 'acxhtx-kv-aguuve6oq6by6'
 $attestKeyName  = 'acxhtx-cvm-attestation-key'
-$preflight = az keyvault key encrypt `
-  --vault-name $attestKeyVault --name $attestKeyName `
-  --algorithm RSA-OAEP-256 --value (New-Guid).Guid.Substring(0,16) `
-  --data-type plaintext --query 'result' -o tsv 2>&1
+$armPath        = "/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.KeyVault/vaults/$attestKeyVault/keys/${attestKeyName}?api-version=2024-04-01-preview"
+$armUrl         = "https://management.azure.com$armPath"
+
+$enabled = az rest --method GET --url $armUrl --query 'properties.attributes.enabled' -o tsv 2>&1
 if ($LASTEXITCODE -ne 0) {
+  Write-Banner "AZURE KV OS ATTESTATION GATE: UNREACHABLE" Red
+  Write-Host "  ARM GET on '$attestKeyName' failed: $enabled" -ForegroundColor Red
+  Write-Host "  Aborting."
+  return
+}
+if ($enabled -ne 'true') {
   Write-Banner "AZURE KV OS ATTESTATION GATE: DENIED" Red
-  Write-Host "  Preflight against key '$attestKeyName' failed:"
-  Write-Host "  $preflight" -ForegroundColor Red
-  Write-Host "  Aborting. The Azure Key Vault OS attestation key is disabled or unreachable."
+  Write-Host "  Key '$attestKeyName' is disabled (properties.attributes.enabled=$enabled)."
+  Write-Host "  A real SEV-SNP Confidential DES against this key would fail at boot for the same reason."
   Write-Host "  Restore with:  .\scripts\demo-toggle-azurekek.ps1 -Enable"
   return
 }
-Write-Host "  Attestation gate PASSED. Continuing." -ForegroundColor Green
+Write-Host "  Attestation gate PASSED (attributes.enabled=true). Continuing." -ForegroundColor Green
 
 Write-Host "`nStep 2/6 : Ensure CVM is running"
 $state = Get-VmPowerState

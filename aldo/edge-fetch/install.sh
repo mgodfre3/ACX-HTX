@@ -57,6 +57,14 @@ sudo -u "$SERVICE_USER" "$INSTALL_ROOT/venv/bin/pip" install -r "$REPO_ROOT/aldo
 sudo cp -r "$REPO_ROOT/aldo/edge-fetch/edge_fetch" "$INSTALL_ROOT/"
 sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_ROOT/edge_fetch"
 
+# --- Secrets file (0600) for the Vault token; NOT baked into the unit ---
+sudo mkdir -p /etc/edge-fetch
+sudo tee /etc/edge-fetch/env >/dev/null <<ENV
+EDGE_FETCH_VAULT_TOKEN=$VAULT_TOKEN
+ENV
+sudo chmod 600 /etc/edge-fetch/env
+sudo chown $SERVICE_USER:$SERVICE_USER /etc/edge-fetch/env
+
 # --- systemd unit ---
 
 LISTEN_HOST="${LISTEN_ADDR%:*}"
@@ -79,8 +87,11 @@ Environment=EDGE_FETCH_ALLOWED_ARM_IDS=$ALLOWED_ARM_IDS
 Environment=EDGE_FETCH_ATTESTATION_MODE=$ATTESTATION_MODE
 Environment=EDGE_FETCH_UNWRAP_URL=http://127.0.0.1:8443/unwrap
 Environment=EDGE_FETCH_VAULT_ADDR=$VAULT_ADDR
-Environment=EDGE_FETCH_VAULT_TOKEN=$VAULT_TOKEN
 Environment=EDGE_FETCH_VAULT_TRANSIT_KEY=$VAULT_TRANSIT_KEY
+# Vault token is intentionally loaded from a 0600 file — do NOT add it to
+# Environment= above. systemctl show would expose Environment= entries to any
+# local user, leaking a token that has encrypt+decrypt on transit/keys/htx-kek.
+EnvironmentFile=/etc/edge-fetch/env
 ExecStart=$INSTALL_ROOT/venv/bin/uvicorn edge_fetch.server:app --host $LISTEN_HOST --port $LISTEN_PORT --log-level info
 Restart=on-failure
 RestartSec=5s
