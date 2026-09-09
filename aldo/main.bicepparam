@@ -14,7 +14,7 @@ param ubuntuGalleryImageId = '/subscriptions/ef23bab2-5bd7-afa3-3013-d5116a94168
 param windowsGalleryImageId = '/subscriptions/ef23bab2-5bd7-afa3-3013-d5116a941684/resourceGroups/Tokyo-WKLD/providers/microsoft.azurestackhci/galleryimages/WS2025'
 
 // SSH public key for the Vault VM admin. Private key retained in session workspace.
-param vaultAdminSshPublicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBx6XGJhkvQ1P6kx9MixBCJ16YyhJ4NKTAVKCorLcGJB htxadmin@aldo-vault'
+param vaultAdminSshPublicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJjMWl4XQqy+6kVW7Lg9zHRPn9OxY4Hqa4mxednOaYu4 htxadmin@aldo-vault'
 param vaultAdminUsername = 'htxadmin'
 
 // Windows VM credentials
