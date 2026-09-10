@@ -30,7 +30,11 @@
 
 .PARAMETER Rehearse
   Run through the acts without pausing for ENTER. Every gate becomes a 1-second
-  delay. Useful for timing dry runs. Kill switches still gated Y/N.
+  delay. Kill-switch acts (6a and 6b) are AUTO-SKIPPED in rehearse mode — they
+  take an extra ~8-10 minutes to run for real, and if the rehearsal were
+  interrupted the keys would stay disabled. Rehearse mode ends after Act 5.
+  Use `.\scripts\demo-presenter.ps1 -Rehearse` once before demo day to check
+  Acts 1-5 pacing.
 
 .PARAMETER Subscription
   Azure subscription. Default: AdaptiveCloudLab.
@@ -60,8 +64,8 @@
 .EXAMPLE
   .\scripts\demo-presenter.ps1 -Rehearse
 
-  Timed dry run. Every gate becomes a 1-second pause. Use once before demo day
-  to sanity-check pacing.
+  Timed dry run of Acts 1-5. Every ENTER gate becomes a 1-second pause. Kill
+  switches auto-skip. Use once before demo day to sanity-check pacing.
 #>
 
 [CmdletBinding()]
@@ -84,6 +88,8 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 
 # --- state used by the finally block ---
 $script:VmStartedByUs = $false
+$script:VaultDisabled = $false    # true iff we've -Disabled the edge Vault Transit key and not yet restored
+$script:AzureKekDisabled = $false # true iff we've -Disabled the AKV attestation key and not yet restored
 
 # ========================================================================
 # Presentation primitives
@@ -125,12 +131,18 @@ function Wait-Gate {
   <#
     Blocks until the operator taps ENTER (or S/Q). In -Rehearse mode this is a
     1-second delay instead of a keypress.
+
+    In -Rehearse mode, gates that -AllowSkip return 'SKIP' automatically so the
+    kill-switch acts are NOT exercised for real during a timed dry run — that
+    would take an extra ~8-10 minutes and would leave the keys disabled if the
+    rehearsal were interrupted.
   #>
   param(
     [string]$Prompt = 'ENTER to continue',
     [switch]$AllowSkip
   )
   if ($Rehearse) {
+    if ($AllowSkip) { return 'SKIP' }
     Start-Sleep -Seconds 1
     return 'ENTER'
   }
@@ -156,6 +168,26 @@ function Get-VmPowerState {
   $j = az vm get-instance-view -g $ResourceGroup -n $VmName --subscription $Subscription --query 'instanceView.statuses' -o json 2>$null | ConvertFrom-Json
   if (-not $j) { return 'unknown' }
   ($j | Where-Object { $_.code -like 'PowerState/*' } | Select-Object -First 1).displayStatus
+}
+
+function Wait-VmRunning {
+  <#
+    Poll for CVM power state = 'VM running'. Throws on timeout so callers don't
+    hang the demo indefinitely if Azure control-plane is slow. Used by Act 2
+    and Act 6a alike.
+  #>
+  param(
+    [int]$TimeoutSec = 180
+  )
+  $started = [DateTime]::UtcNow
+  while ((Get-VmPowerState) -ne 'VM running') {
+    if (([DateTime]::UtcNow - $started).TotalSeconds -gt $TimeoutSec) {
+      throw "CVM did not reach 'VM running' within ${TimeoutSec}s"
+    }
+    Start-Sleep -Seconds 5
+    Write-Host '.' -NoNewline -ForegroundColor DarkGray
+  }
+  Write-Host ' running'
 }
 
 function Ensure-AzContext {
@@ -236,15 +268,7 @@ function Invoke-Act2 {
     Show-Doing "azure: az vm start -g $ResourceGroup -n $VmName"
     az vm start -g $ResourceGroup -n $VmName --no-wait | Out-Null
     $script:VmStartedByUs = $true
-    $started = [DateTime]::UtcNow
-    while ((Get-VmPowerState) -ne 'VM running') {
-      if (([DateTime]::UtcNow - $started).TotalSeconds -gt 180) {
-        throw "CVM did not start within 180s"
-      }
-      Start-Sleep -Seconds 5
-      Write-Host '.' -NoNewline -ForegroundColor DarkGray
-    }
-    Write-Host " running"
+    Wait-VmRunning -TimeoutSec 180
   } else {
     Show-Doing 'azure: CVM already running, no start needed'
   }
@@ -295,6 +319,7 @@ function Invoke-Act6a {
 
   Show-Doing 'edge: demo-toggle-vault.ps1 -Disable (bumps min_decryption_version)'
   & (Join-Path $scriptDir 'demo-toggle-vault.ps1') -Disable
+  $script:VaultDisabled = $true
 
   Show-StageLine 'The CVM will attest and fetch, but the unwrap call will fail 403. That''s the sovereignty story — a property of the wiring, not a promise from Microsoft.'
   Wait-Gate 'ENTER to run the burst and prove the kill' | Out-Null
@@ -305,8 +330,7 @@ function Invoke-Act6a {
     Show-Doing 'azure: starting CVM for the failed-burst demo'
     az vm start -g $ResourceGroup -n $VmName --no-wait | Out-Null
     $script:VmStartedByUs = $true
-    while ((Get-VmPowerState) -ne 'VM running') { Start-Sleep -Seconds 5; Write-Host '.' -NoNewline -ForegroundColor DarkGray }
-    Write-Host ' running'
+    Wait-VmRunning -TimeoutSec 180
   }
 
   Show-Doing 'orchestrator: demo-burst.ps1 (expect Phase C unwrap failure)'
@@ -320,6 +344,7 @@ function Invoke-Act6a {
   Show-StageLine 'Restoring the key so the next audience sees a working demo.'
   Wait-Gate 'ENTER to re-enable' | Out-Null
   & (Join-Path $scriptDir 'demo-toggle-vault.ps1') -Enable
+  $script:VaultDisabled = $false
 }
 
 function Invoke-Act6b {
@@ -330,6 +355,7 @@ function Invoke-Act6b {
 
   Show-Doing 'azure: demo-toggle-azurekek.ps1 -Disable (bumps vault firewall + data-plane set-attributes false)'
   & (Join-Path $scriptDir 'demo-toggle-azurekek.ps1') -Disable
+  $script:AzureKekDisabled = $true
 
   Show-StageLine 'When we try to burst, the orchestrator preflights the AKV key and aborts BEFORE `az vm start`. A real SEV-SNP DES would fail at boot for the same reason.'
   Wait-Gate 'ENTER to run the burst and prove the preflight abort' | Out-Null
@@ -344,6 +370,7 @@ function Invoke-Act6b {
   Show-StageLine 'Restoring the key.'
   Wait-Gate 'ENTER to re-enable' | Out-Null
   & (Join-Path $scriptDir 'demo-toggle-azurekek.ps1') -Enable
+  $script:AzureKekDisabled = $false
 }
 
 # ========================================================================
@@ -401,9 +428,43 @@ try {
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed
   }
 } finally {
+  # Best-effort recovery: if we started the CVM ourselves, deallocate it.
+  # If either kill-switch key was disabled by us and not yet restored, restore
+  # it. If restore fails, print an explicit warning so the operator doesn't
+  # walk away thinking the world is back to normal.
   if ($script:VmStartedByUs) {
     Write-Host ''
     Write-Host '  Cleanup: deallocating CVM (we started it, so we stop it).' -ForegroundColor DarkYellow
     az vm deallocate -g $ResourceGroup -n $VmName --no-wait 2>$null | Out-Null
+  }
+  if ($script:VaultDisabled) {
+    Write-Host ''
+    Write-Host '  Cleanup: EDGE VAULT KEY IS STILL DISABLED — attempting -Enable...' -ForegroundColor Yellow
+    try {
+      & (Join-Path $scriptDir 'demo-toggle-vault.ps1') -Enable
+      Write-Host '  Edge Vault key restored.' -ForegroundColor Green
+    } catch {
+      Write-Host ''
+      Write-Host '  ==== ACTION REQUIRED ====' -ForegroundColor Red
+      Write-Host '  Could not automatically re-enable the edge Vault Transit key.' -ForegroundColor Red
+      Write-Host '  Run this manually before the next demo:' -ForegroundColor Red
+      Write-Host '      .\scripts\demo-toggle-vault.ps1 -Enable' -ForegroundColor Red
+      Write-Host "  Underlying error: $($_.Exception.Message)" -ForegroundColor Red
+    }
+  }
+  if ($script:AzureKekDisabled) {
+    Write-Host ''
+    Write-Host '  Cleanup: AZURE KV ATTESTATION KEY IS STILL DISABLED — attempting -Enable...' -ForegroundColor Yellow
+    try {
+      & (Join-Path $scriptDir 'demo-toggle-azurekek.ps1') -Enable
+      Write-Host '  Azure Key Vault attestation key restored.' -ForegroundColor Green
+    } catch {
+      Write-Host ''
+      Write-Host '  ==== ACTION REQUIRED ====' -ForegroundColor Red
+      Write-Host '  Could not automatically re-enable acxhtx-cvm-attestation-key.' -ForegroundColor Red
+      Write-Host '  Run this manually before the next demo:' -ForegroundColor Red
+      Write-Host '      .\scripts\demo-toggle-azurekek.ps1 -Enable' -ForegroundColor Red
+      Write-Host "  Underlying error: $($_.Exception.Message)" -ForegroundColor Red
+    }
   }
 }
