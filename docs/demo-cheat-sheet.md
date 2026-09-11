@@ -9,17 +9,44 @@ Print this. Keep the laptop's font size big enough that the audience-facing moni
 
 > Azure can start the machine. Only the edge can unlock the data.
 
+## Presenter mode — recommended default
+
+One command drives the whole demo. ENTER-gated between acts. You focus on the customer conversation; the script prints each act's on-stage line, waits for you to tap ENTER, then runs the underlying commands.
+
+```powershell
+# Full six-act run
+.\scripts\demo-presenter.ps1
+
+# Highlights only (Acts 1-5, no kill switches)
+.\scripts\demo-presenter.ps1 -SkipToggles
+
+# Timed dry run — no ENTER gates (1-second pauses instead). Use once before demo day.
+.\scripts\demo-presenter.ps1 -Rehearse
+```
+
+Controls while running:
+- **ENTER** — advance to the next act (or run the current act's commands)
+- **S** — skip the current act (only meaningful for kill-switch acts)
+- **Q** or **Ctrl-C** — quit cleanly (deallocates the CVM if we started it)
+
+The presenter calls `demo-burst.ps1`, `demo-toggle-vault.ps1`, and `demo-toggle-azurekek.ps1` internally — those still exist and can be run standalone if you need to work off-script.
+
 ## Pre-demo checklist (T-30 min)
 
 - [ ] VPN + tenant: `az account show --query tenantId -o tsv` returns `d1623670-9777-4399-aaf6-01d87b84ef1d`.
 - [ ] Edge reachable: `ping 172.22.218.200` from the operator laptop.
 - [ ] Edge services up:
-      `ssh edge@172.22.218.200 'systemctl is-active vault edge-fetch unwrap'` → three `active`s.
+      `ssh edge@172.22.218.200 'systemctl is-active vault edge-fetch'` → two `active`s.
 - [ ] `curl -sS http://172.22.218.200:8444/healthz | jq` returns `status=ok`, `unwrap_service=reachable`.
 - [ ] CVM stopped-deallocated and pre-warmed once (start-stop cycle to shake out first-boot slowness).
 - [ ] Sample video seeded: `ssh edge@172.22.218.200 'ls /var/lib/edge-fetch/videos/'` shows at least `sample-video-01/`.
 - [ ] Portal tabs open: RG `ACX-HTX`; KV → Keys blade; VM `acxhtx-vm` overview.
-- [ ] Two shells side by side. Left = SSH to edge, split-tmux with `journalctl -u edge-fetch -f` on top. Right = local PowerShell, `az account set` done.
+- [ ] `HTX_VAULT_INIT_PATH` env var set (or `~/.htx/vault-init.json` in place) — the Vault toggle needs the root token.
+- [ ] Ran `demo-presenter.ps1 -Rehearse` at least once end-to-end.
+
+## Manual mode — for off-script Q&A
+
+If you need to drop out of the presenter and run individual commands, this is the raw command matrix aligned to the storyboard acts.
 
 ## Act 1 — What's here, what isn't (90 s)
 
