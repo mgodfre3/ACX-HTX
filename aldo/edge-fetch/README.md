@@ -101,7 +101,9 @@ GET /audit/tail?n=20
 
 ## Vault token
 
-The server proxies wrap/unwrap to Vault Transit, so it needs a token with `encrypt` and `decrypt` policy on `transit/keys/htx-kek`. Supply it via `VAULT_TOKEN` when running `install.sh`. **Never pass the Vault root token here** — use the producer token from `vault-app-tokens.json` (`5YxsbRmtndcZgfNfVbi16TM3` in your session) or a purpose-scoped token.
+The server proxies wrap/unwrap to Vault Transit, so it needs a token with `encrypt` and `decrypt` policy on `transit/keys/htx-kek`. Supply it via `VAULT_TOKEN` when running `install.sh`.
+
+**Never pass the Vault root token here.** Use a purpose-scoped token that has been minted as **orphan periodic**. The current provisioned token is `htx-edge-fetch` (accessor `KT8F0qJQibJBk2Vbx2ZBZSq5` as of 2026-09-14 -- accessor is safe to reference; the value stays on the edge). If you need to re-mint it, follow the guide in [`docs/vault-token-runbook.md`](../../docs/vault-token-runbook.md) -- **always use `-orphan`**, or the next Vault root rotation will cascade-revoke this token and take the demo offline.
 
 ## Fail-closed guard
 
