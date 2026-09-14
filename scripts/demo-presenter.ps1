@@ -100,7 +100,9 @@ function Show-Divider {
 }
 
 function Show-ActBanner {
-  param([int]$Number, [string]$Title, [string]$TargetSeconds = '')
+  # $Number is [string] not [int] so we can pass "6a" and "6b" for the split
+  # kill-switch acts (Invoke-Act6a / Invoke-Act6b). Do not tighten the type.
+  param([string]$Number, [string]$Title, [string]$TargetSeconds = '')
   $tag = if ($TargetSeconds) { " [~${TargetSeconds}s]" } else { '' }
   Write-Host ''
   Write-Host ('=' * 78) -ForegroundColor Cyan
