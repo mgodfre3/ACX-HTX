@@ -38,14 +38,14 @@ Orphan tokens have no parent, so nothing revokes them when root rotates.
 
 All four scoped tokens are now orphan periodic (as of 2026-09-14 root rotation). Accessors are safe to reference; the values live only on the edge.
 
-| Token | Accessor | Policy | Consumer |
-|---|---|---|---|
-| `htx-edge-fetch` | `KT8F0qJQibJBk2Vbx2ZBZSq5` | transit encrypt+decrypt on htx-kek | edge-fetch systemd service (172.22.218.200) |
-| `htx-toggle` | `J7wqli7KjXvPaMvbq76rQ9aU` | transit rotate/config/read on htx-kek | scripts/demo-toggle-vault.ps1 via ssh |
-| `htx-producer` | `rSryuRBCahcgkWeKWyNcZhrB` | seed_video / producer path (transit encrypt on htx-kek) | Foundry producer VM (172.22.218.201) |
-| `htx-unwrap` | `Wr8wQUca34TyV2HELAhLl756` | transit decrypt on htx-kek | legacy unwrap service on :8443 |
+| Token | Accessor | Policy | Installed at | File format | Mode | Owner |
+|---|---|---|---|---|---|---|
+| `htx-edge-fetch` | `KT8F0qJQibJBk2Vbx2ZBZSq5` | transit encrypt+decrypt on htx-kek | `/etc/edge-fetch/env` | `EDGE_FETCH_VAULT_TOKEN=<value>` (systemd EnvironmentFile) | `0600` | `edge:edge` |
+| `htx-toggle` | `J7wqli7KjXvPaMvbq76rQ9aU` | transit rotate/config/read on htx-kek | `/etc/vault/htx-toggle-token` | raw token, no newline | `0440` | `root:edge` |
+| `htx-producer` | `rSryuRBCahcgkWeKWyNcZhrB` | seed_video / producer path (transit encrypt on htx-kek) | Foundry producer VM `HTX_VAULT_TOKEN` Machine env var (172.22.218.201) | env-var value | n/a | Machine-scope |
+| `htx-unwrap` | `Wr8wQUca34TyV2HELAhLl756` | transit decrypt on htx-kek | legacy unwrap service config on :8443 | raw token | `0400` | `root:root` |
 
-If a token file is regenerated, only the value at rest changes; the file paths (`/etc/vault/htx-toggle-token`, `/etc/edge-fetch/env`, etc.) and file permissions (0440 root:edge, 0600 root:root, etc.) stay the same. No PowerShell-side changes are needed.
+**When re-minting a token, follow the row above for that specific token.** The file location, format, mode, and owner MUST match; the ceremony below covers the raw-token pattern (used by `htx-toggle` and `htx-unwrap`), but `htx-edge-fetch` uses the KEY=VALUE env-file pattern -- see the alternative install step in the ceremony section for that shape.
 
 ## When to re-mint
 
@@ -82,20 +82,67 @@ NEW_TOKEN=$(jq -r .auth.client_token /tmp/mint.json)
 
 echo "new accessor: $NEW_ACCESSOR"
 echo "token ends in: ${NEW_TOKEN: -6}"    # never print the full value
+```
 
-# Install the token at its known path (adjust for the service)
-echo -n "$NEW_TOKEN" | sudo tee /etc/vault/<token-file> > /dev/null
-sudo chmod 0440 /etc/vault/<token-file>
-sudo chown root:edge /etc/vault/<token-file>
+Now install the token. The install step differs by consumer -- pick the row that matches the token you're re-minting from the "Provisioned tokens" table above.
 
-# Verify the file
-sudo -u edge cat /etc/vault/<token-file> | wc -c    # non-zero
-sudo -u edge sh -c 'export VAULT_ADDR=http://127.0.0.1:8200; \
-  export VAULT_TOKEN=$(cat /etc/vault/<token-file>); \
-  vault token lookup | grep -E "policies|renewable|orphan"'
+### Install pattern A: raw token file (`htx-toggle`, `htx-unwrap`)
+
+```bash
+# Adjust for the specific token being re-minted
+TARGET=/etc/vault/htx-toggle-token   # from the table above
+OWNER=root:edge                       # from the table above
+MODE=0440                              # from the table above
+
+echo -n "$NEW_TOKEN" | sudo tee "$TARGET" > /dev/null
+sudo chmod "$MODE" "$TARGET"
+sudo chown "$OWNER" "$TARGET"
+
+# Verify: the intended reader (e.g., edge) can read it
+sudo -u edge cat "$TARGET" | wc -c    # non-zero
+sudo -u edge sh -c "export VAULT_ADDR=http://127.0.0.1:8200; \
+  export VAULT_TOKEN=\$(cat $TARGET); \
+  vault token lookup | grep -E 'policies|renewable|orphan'"
 # Expect: policies contains the intended policy, renewable=true, orphan=true
+```
 
-# Shred the temp
+### Install pattern B: systemd EnvironmentFile (`htx-edge-fetch`)
+
+```bash
+TARGET=/etc/edge-fetch/env
+# Rewrite ONLY the EDGE_FETCH_VAULT_TOKEN line; preserve the rest.
+sudo sed -i "s|^EDGE_FETCH_VAULT_TOKEN=.*|EDGE_FETCH_VAULT_TOKEN=$NEW_TOKEN|" "$TARGET"
+sudo chmod 0600 "$TARGET"
+sudo chown edge:edge "$TARGET"
+
+# Restart the service so it picks up the new value
+sudo systemctl restart edge-fetch
+
+# Verify: service is healthy
+curl -sS http://127.0.0.1:8444/healthz | jq -r '.status'
+# Expect: ok
+```
+
+### Install pattern C: env-var on a remote Windows VM (`htx-producer`)
+
+```bash
+# This one lives on the Foundry producer VM at 172.22.218.201 as a Machine
+# scope env var. From the Vault VM you cannot set it directly; hand off the
+# new token to the ALDO Copilot agent on the Foundry VM and have that session
+# run (PowerShell, elevated):
+#
+#   [Environment]::SetEnvironmentVariable(
+#     'HTX_VAULT_TOKEN',
+#     '<new token value>',
+#     'Machine')
+#
+# Then restart any scheduled producer task or the producer process so it
+# rereads the Machine env var.
+```
+
+### Cleanup (all patterns)
+
+```bash
 shred -u /tmp/mint.json
 ```
 
@@ -103,14 +150,24 @@ shred -u /tmp/mint.json
 
 The 2026-09-14 root rotation exposed the child-token cascade problem. If you rotate root again, follow this order:
 
-1. **Pre-flight (mandatory).** Inventory every scoped token you know about and check each one for `orphan=true`:
+1. **Pre-flight (mandatory).** Enumerate every scoped token on the Vault instance and check each one for `orphan=true`. Use **discovery**, not memory — a hardcoded list of "known" accessors is what led to the 2026-09-14 incident, and if a future service is provisioned without being added to that list, the same failure will repeat.
    ```bash
-   for A in KT8F0qJQibJBk2Vbx2ZBZSq5 J7wqli7KjXvPaMvbq76rQ9aU rSryuRBCahcgkWeKWyNcZhrB Wr8wQUca34TyV2HELAhLl756; do
-     echo "--- $A ---"
-     vault token lookup -accessor "$A" | grep -E 'orphan|policies|renewable'
-   done
+   sudo -i
+   export VAULT_ADDR=http://127.0.0.1:8200
+   export VAULT_TOKEN=$(jq -r .root_token /root/vault-init.json)
+
+   # List every accessor in the token store, look up each, print the fields
+   # that matter for rotation safety.
+   vault list -format=json auth/token/accessors \
+     | jq -r '.[]' \
+     | while read -r A; do
+         vault token lookup -accessor "$A" -format=json 2>/dev/null \
+           | jq -r '[.data.display_name, .data.accessor, (.data.orphan|tostring), (.data.policies|join(","))] | @tsv' \
+           2>/dev/null
+       done \
+     | column -t -s $'\t'
    ```
-   Any token with `orphan false` needs to be re-minted as orphan **before** you touch root. If you skip this step and the rotation cascades to it, service breaks and you have to re-mint under time pressure.
+   Skim the output. **Any row where the third column (`orphan`) is `false` and the fourth column is not `root` must be re-minted as orphan BEFORE you touch the root ceremony.** If you skip this step and the rotation cascades to a child token, the affected service breaks and you have to re-mint under time pressure. (Root's own token entry will show `orphan=false` -- that's expected and is what gets rotated; it's the non-root children that matter.)
 
 2. **Ceremony.** `vault operator generate-root -init`, provide unseal key(s), decode the encoded token, capture the accessor.
 
