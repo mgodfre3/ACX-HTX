@@ -56,6 +56,26 @@ def _wrap_dek_with_vault(vault_addr: str, vault_token: str, kek_name: str, dek: 
     return r.json()["data"]["ciphertext"]
 
 
+def _read_kek_type(vault_addr: str, vault_token: str, kek_name: str) -> str:
+    """
+    Query Vault for the KEK's type so the envelope's wrap_algo label matches
+    reality. Historically this was hardcoded to 'vault-transit-aes256gcm96' but
+    the deployed key is 'rsa-3072'. The label is metadata-only (unwrap works
+    regardless because Vault knows its own key type), but a wrong label misleads
+    reviewers reading the envelope in the demo.
+    """
+    url = f"{vault_addr.rstrip('/')}/v1/transit/keys/{kek_name}"
+    headers = {"X-Vault-Token": vault_token}
+    try:
+        r = httpx.get(url, headers=headers, timeout=5.0)
+        r.raise_for_status()
+        key_type = r.json()["data"]["type"]  # e.g. "rsa-3072", "aes256-gcm96"
+        return f"vault-transit-{key_type}"
+    except Exception as ex:
+        log.warning("could not read KEK type (%s); labeling wrap_algo=vault-transit-unknown", ex)
+        return "vault-transit-unknown"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Seed a burst-CVM video envelope.")
     p.add_argument("--video-id", required=True, help="Logical ID under storage-root/videos/")
@@ -88,11 +108,15 @@ def main() -> int:
     )
     log.info("wrapped DEK via Vault Transit key %r", args.kek_name)
 
+    # Query Vault for the actual KEK type so wrap_algo reflects reality rather
+    # than a stale hardcoded label. See _read_kek_type for the incident context.
+    wrap_algo = _read_kek_type(args.vault_addr, args.vault_token, args.kek_name)
+
     envelope = {
         "version": "burst-cvm-1",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "kek_ref": f"transit/keys/{args.kek_name}",
-        "wrap_algo": "vault-transit-aes256gcm96",
+        "wrap_algo": wrap_algo,
         "wrapped_dek_b64": wrapped_dek,   # Vault ciphertext is already string-encoded ("vault:v1:...")
         "data_algo": "aes-256-gcm",
         "nonce_b64": base64.b64encode(nonce).decode("ascii"),

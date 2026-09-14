@@ -238,7 +238,13 @@ function Invoke-Act1 {
   Write-Host ''
 
   Show-Doing 'edge: confirm the Transit key is present locally on the on-prem Vault'
-  Invoke-Edge 'vault read -field=type transit/keys/htx-kek || vault read transit/keys/htx-kek | head -6'
+  # Uses the scoped htx-toggle token (0440 root:edge, has read on transit/keys/htx-kek).
+  # -field=type prints just the key type (e.g. rsa-3072) on one line so the on-stage
+  # output is a single crisp line rather than the ~30-row default that includes the
+  # embedded PEM public key. Vault only ever sees a token value in-memory in the ssh
+  # session; no value ever crosses the operator's PowerShell transcript because the
+  # $(cat ...) subshell is single-quoted client-side. See docs/vault-token-runbook.md.
+  Invoke-Edge 'VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$(cat /etc/vault/htx-toggle-token)" vault read -field=type transit/keys/htx-kek'
 
   Show-StageLine 'Now look at what''s in Azure. Zero storage accounts holding customer data.'
   Wait-Gate 'ENTER to show the Azure state' | Out-Null
