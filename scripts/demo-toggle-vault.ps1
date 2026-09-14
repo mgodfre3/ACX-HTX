@@ -119,17 +119,46 @@ fi
 $Block
 "@
 
-  # PowerShell here-strings on Windows produce CRLF line endings. When piped to
-  # a POSIX shell, the trailing \r attaches to each token -- e.g., `set -eu\r`
-  # becomes `set -eu<CR>` and bash sees the CR as part of the arg list, printing
-  # "invalid option: -". Normalize to LF before piping to ssh.
-  $remoteLf = $remote -replace "`r`n", "`n"
+  # POWERSHELL NEWLINE HANDLING (the bug that took two attempts to fix):
+  # When PowerShell pipes a multi-line string to a NATIVE process's stdin (like
+  # `$string | ssh.exe`), the pipeline invokes newline-conversion via
+  # [Console]::OutputEncoding + Environment.NewLine and inserts CRLF at every
+  # line boundary. That CRLF stays attached on the far side and bash sees
+  # `set -eu<CR>` and prints "invalid option: -" then dies on unexpected EOF.
+  #
+  # A `-replace` on the string is a no-op relative to that boundary conversion:
+  # the pipeline re-adds CRLF regardless of what the string had.
+  #
+  # The fix is to bypass the native pipeline entirely: start ssh via
+  # System.Diagnostics.Process, get its raw stdin BaseStream, write LF-encoded
+  # UTF-8 bytes directly. BaseStream skips the StreamWriter (which is where
+  # newline conversion happens). See the warning above the .Write() call below.
+  $remoteLf = $remote -replace "`r`n", "`n"   # defense-in-depth for CRLF in $Block
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($remoteLf)
 
-  # -T disables pseudo-tty allocation, keeps stdout clean and avoids ncurses
-  # escape sequences leaking into the banner output.
-  $remoteLf | ssh -T "$EdgeSshUser@$EdgeHost" 'bash -s'
-  if ($LASTEXITCODE -ne 0) {
-    throw "edge vault command failed (ssh exit $LASTEXITCODE). See stderr above."
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'ssh'
+  # -T disables pseudo-tty allocation, keeps stdout clean.
+  $psi.Arguments = "-T $EdgeSshUser@$EdgeHost `"bash -s`""
+  $psi.RedirectStandardInput = $true
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  try {
+    # DO NOT change to $proc.StandardInput.Write or WriteLine. StandardInput is a
+    # StreamWriter whose NewLine defaults to "`r`n" on Windows PS 5.1; going
+    # through it reinserts CRLF and the "invalid option: -" bug returns. Always
+    # write raw bytes to BaseStream to bypass all encoding+newline handling.
+    $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
+  } finally {
+    $proc.StandardInput.Close()   # signal EOF to bash -s
+  }
+  $proc.WaitForExit()
+
+  if ($proc.ExitCode -ne 0) {
+    throw "edge vault command failed (ssh exit $($proc.ExitCode)). See stderr above."
   }
 }
 
