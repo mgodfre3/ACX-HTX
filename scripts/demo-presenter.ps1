@@ -198,9 +198,44 @@ function Ensure-AzContext {
 }
 
 function Invoke-Edge {
-  <# Run a single shell command on the edge and return stdout. #>
+  <#
+    Run a shell command on the edge and stream stdout back.
+
+    We use System.Diagnostics.Process and write the command as UTF-8 LF-encoded
+    bytes into ssh's stdin, then invoke it as `bash -s`. This completely bypasses
+    PowerShell's native-command argv+quoting layer, which is fragile when the
+    command string contains `$(...)`, embedded double-quotes, or other bash
+    metasyntax (e.g., Act 1's `VAULT_TOKEN="$(cat /etc/vault/htx-toggle-token)"`
+    prefix that got mangled through `ssh user@host "..."` and silently produced
+    an empty token → 403 permission denied on the far side).
+
+    Same pattern that PR #6 landed for demo-toggle-vault.ps1's Invoke-EdgeVault.
+  #>
   param([string]$Command)
-  ssh "$EdgeSshUser@$EdgeHost" "$Command"
+
+  $commandLf = $Command -replace "`r`n", "`n"
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($commandLf)
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'ssh'
+  $psi.Arguments = "-T $EdgeSshUser@$EdgeHost `"bash -s`""
+  $psi.RedirectStandardInput = $true
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  try {
+    # DO NOT change to $proc.StandardInput.Write or WriteLine -- StreamWriter
+    # reinserts CRLF on Windows PS 5.1 and reintroduces the bug PR #6 fixed.
+    $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
+  } finally {
+    $proc.StandardInput.Close()
+  }
+  $proc.WaitForExit()
+  if ($proc.ExitCode -ne 0) {
+    Write-Host "  [edge command failed: ssh exit $($proc.ExitCode)]" -ForegroundColor DarkYellow
+  }
 }
 
 function Tail-EdgeAudit {
