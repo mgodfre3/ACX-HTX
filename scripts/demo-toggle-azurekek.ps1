@@ -56,7 +56,11 @@ function Add-FirewallSubnets {
   foreach ($s in $Subnets) {
     az keyvault network-rule add --name $VaultName --ip-address $s -o none 2>&1 | Out-Null
   }
-  Start-Sleep -Seconds 20   # propagation delay
+  # Azure Key Vault firewall changes are eventually consistent. Empirically this
+  # takes 30-90 seconds to reach every front-end. Historical 20s wait was too
+  # short and the retry loop below hit its window before propagation completed.
+  Write-Host "  Waiting 45s for firewall rule propagation..." -ForegroundColor DarkGray
+  Start-Sleep -Seconds 45
 }
 
 function Remove-FirewallSubnets {
@@ -69,10 +73,19 @@ function Remove-FirewallSubnets {
 function Set-KeyEnabled {
   param([bool]$Enabled)
   $desired = if ($Enabled) { 'true' } else { 'false' }
-  for ($i = 1; $i -le 4; $i++) {
+  # 8 attempts x 15s = 2 minute total window past the initial 45s wait. Chosen
+  # to accommodate the slowest observed KV firewall propagation without leaving
+  # the operator staring at a silent script.
+  $maxAttempts = 8
+  for ($i = 1; $i -le $maxAttempts; $i++) {
     $out = az keyvault key set-attributes --vault-name $VaultName --name $KeyName --enabled $Enabled --query 'attributes.enabled' -o tsv 2>&1
-    if ($LASTEXITCODE -eq 0 -and ($out -eq $desired -or $out -eq $desired.Substring(0,1).ToUpper() + $desired.Substring(1))) { return $true }
-    Start-Sleep -Seconds 10
+    if ($LASTEXITCODE -eq 0 -and ($out -eq $desired -or $out -eq $desired.Substring(0,1).ToUpper() + $desired.Substring(1))) {
+      Write-Host "  attempt $i/$maxAttempts : succeeded" -ForegroundColor DarkGreen
+      return $true
+    }
+    $reason = if ($out -match 'ForbiddenByFirewall|Client address is not authorized') { 'firewall not yet propagated' } else { 'other error' }
+    Write-Host "  attempt $i/$maxAttempts : failed ($reason); retrying in 15s..." -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 15
   }
   Write-Host "  Last error: $out" -ForegroundColor Red
   return $false
