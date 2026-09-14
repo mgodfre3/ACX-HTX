@@ -40,12 +40,16 @@ param(
   [switch]$SkipFirewallBump
 )
 
-# NOTE: script-level $ErrorActionPreference is deliberately LEFT DEFAULT here.
-# A previous revision set it to 'Stop', which turned every non-zero az CLI exit
-# into a terminating error and unwound the retry loop in Set-KeyEnabled before
-# it could iterate -- silently. The whole point of that retry loop is to absorb
-# Azure Key Vault firewall propagation timing, so it MUST tolerate transient
-# ForbiddenByFirewall errors. Individual az calls check $LASTEXITCODE explicitly.
+# NOTE: script-level $ErrorActionPreference is deliberately set to 'Continue'
+# to SHADOW any inherited value from a parent scope. If this script is invoked
+# via `& demo-toggle-azurekek.ps1` from a parent that already set 'Stop' (e.g.,
+# demo-presenter.ps1 does exactly that at its top), and we only omitted an
+# explicit assignment here, the parent's 'Stop' would bleed in. That turns
+# every non-zero az CLI exit into a terminating error and unwinds the retry
+# loop in Set-KeyEnabled before it can iterate -- silently. The retry loop
+# MUST tolerate transient ForbiddenByFirewall errors; individual az calls
+# check $LASTEXITCODE explicitly. Do not remove this line.
+$ErrorActionPreference = 'Continue'
 
 if (-not $NoAutoDetectEgress) {
   try {
