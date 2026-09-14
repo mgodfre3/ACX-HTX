@@ -89,18 +89,22 @@ Now install the token. The install step differs by consumer -- pick the row that
 ### Install pattern A: raw token file (`htx-toggle`, `htx-unwrap`)
 
 ```bash
-# Adjust for the specific token being re-minted
-TARGET=/etc/vault/htx-toggle-token   # from the table above
-OWNER=root:edge                       # from the table above
-MODE=0440                              # from the table above
+# Adjust for the specific token being re-minted (from the "Provisioned tokens" table)
+TARGET=/etc/vault/htx-toggle-token   # e.g., /etc/vault/htx-toggle-token or the htx-unwrap path
+OWNER=root:edge                       # e.g., root:edge (htx-toggle) or root:root (htx-unwrap)
+MODE=0440                              # e.g., 0440 (htx-toggle) or 0400 (htx-unwrap)
+READER=edge                            # the user that actually reads the token: 'edge' for
+                                       # htx-toggle (needed for demo-toggle-vault.ps1's ssh call);
+                                       # 'root' for htx-unwrap (read by the unwrap service, which
+                                       # runs as root).
 
 echo -n "$NEW_TOKEN" | sudo tee "$TARGET" > /dev/null
 sudo chmod "$MODE" "$TARGET"
 sudo chown "$OWNER" "$TARGET"
 
-# Verify: the intended reader (e.g., edge) can read it
-sudo -u edge cat "$TARGET" | wc -c    # non-zero
-sudo -u edge sh -c "export VAULT_ADDR=http://127.0.0.1:8200; \
+# Verify: the intended reader can read it, and the token itself is valid
+sudo -u "$READER" cat "$TARGET" | wc -c    # non-zero
+sudo -u "$READER" sh -c "export VAULT_ADDR=http://127.0.0.1:8200; \
   export VAULT_TOKEN=\$(cat $TARGET); \
   vault token lookup | grep -E 'policies|renewable|orphan'"
 # Expect: policies contains the intended policy, renewable=true, orphan=true
