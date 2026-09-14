@@ -120,20 +120,20 @@ $Block
 "@
 
   # POWERSHELL NEWLINE HANDLING (the bug that took two attempts to fix):
-  # PowerShell here-strings on Windows contain bare LF in memory. But when
-  # a string is piped to a NATIVE process's stdin (like ssh.exe), PowerShell's
-  # pipeline converts every LF to CRLF using [Console]::OutputEncoding line
-  # semantics. That CRLF stays attached on the far side and bash sees
+  # When PowerShell pipes a multi-line string to a NATIVE process's stdin (like
+  # `$string | ssh.exe`), the pipeline invokes newline-conversion via
+  # [Console]::OutputEncoding + Environment.NewLine and inserts CRLF at every
+  # line boundary. That CRLF stays attached on the far side and bash sees
   # `set -eu<CR>` and prints "invalid option: -" then dies on unexpected EOF.
   #
-  # A `-replace` on the string is a no-op because the string itself has LF only;
-  # the CRLF appears at the boundary between PowerShell and the native process.
+  # A `-replace` on the string is a no-op relative to that boundary conversion:
+  # the pipeline re-adds CRLF regardless of what the string had.
   #
   # The fix is to bypass the native pipeline entirely: start ssh via
   # System.Diagnostics.Process, get its raw stdin BaseStream, write LF-encoded
-  # UTF-8 bytes directly. No newline conversion happens because we never touch
-  # a StreamWriter or a PowerShell pipe.
-  $remoteLf = $remote -replace "`r`n", "`n"   # belt-and-suspenders; here-strings should already be LF
+  # UTF-8 bytes directly. BaseStream skips the StreamWriter (which is where
+  # newline conversion happens). See the warning above the .Write() call below.
+  $remoteLf = $remote -replace "`r`n", "`n"   # defense-in-depth for CRLF in $Block
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($remoteLf)
 
   $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -146,6 +146,10 @@ $Block
 
   $proc = [System.Diagnostics.Process]::Start($psi)
   try {
+    # DO NOT change to $proc.StandardInput.Write or WriteLine. StandardInput is a
+    # StreamWriter whose NewLine defaults to "`r`n" on Windows PS 5.1; going
+    # through it reinserts CRLF and the "invalid option: -" bug returns. Always
+    # write raw bytes to BaseStream to bypass all encoding+newline handling.
     $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
     $proc.StandardInput.BaseStream.Flush()
   } finally {
