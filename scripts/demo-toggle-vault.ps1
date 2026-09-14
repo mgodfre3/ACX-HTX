@@ -119,9 +119,15 @@ fi
 $Block
 "@
 
+  # PowerShell here-strings on Windows produce CRLF line endings. When piped to
+  # a POSIX shell, the trailing \r attaches to each token -- e.g., `set -eu\r`
+  # becomes `set -eu<CR>` and bash sees the CR as part of the arg list, printing
+  # "invalid option: -". Normalize to LF before piping to ssh.
+  $remoteLf = $remote -replace "`r`n", "`n"
+
   # -T disables pseudo-tty allocation, keeps stdout clean and avoids ncurses
   # escape sequences leaking into the banner output.
-  $remote | ssh -T "$EdgeSshUser@$EdgeHost" 'bash -s'
+  $remoteLf | ssh -T "$EdgeSshUser@$EdgeHost" 'bash -s'
   if ($LASTEXITCODE -ne 0) {
     throw "edge vault command failed (ssh exit $LASTEXITCODE). See stderr above."
   }
