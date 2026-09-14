@@ -22,10 +22,11 @@ ALLOWED_ARM_IDS="${ALLOWED_ARM_IDS:-/subscriptions/fbaf508b-cb61-4383-9cda-a42bf
 ATTESTATION_MODE="${ATTESTATION_MODE:-stub}"
 
 # Vault token used by edge-fetch to proxy Transit encrypt/decrypt for /wrap and /unwrap.
-# Must have policy allowing encrypt+decrypt on transit/keys/htx-kek.
-# The producer token from vault-app-tokens.json is a fine choice; the unwrap
-# token is another. NEVER pass the Vault root token here.
-VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required — provide a Vault token with transit encrypt+decrypt on htx-kek}"
+# Must have policy allowing encrypt+decrypt on transit/keys/htx-kek. The token MUST
+# be minted as orphan periodic -- see docs/vault-token-runbook.md for the ceremony.
+# The provisioned token accessor is 'htx-edge-fetch' (KT8F0qJQibJBk2Vbx2ZBZSq5) --
+# NEVER pass the Vault root token here.
+VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required — provide an orphan periodic Vault token with transit encrypt+decrypt on htx-kek. See docs/vault-token-runbook.md.}"
 VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 VAULT_TRANSIT_KEY="${VAULT_TRANSIT_KEY:-htx-kek}"
 
