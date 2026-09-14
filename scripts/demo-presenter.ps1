@@ -238,7 +238,11 @@ function Invoke-Act1 {
   Write-Host ''
 
   Show-Doing 'edge: confirm the Transit key is present locally on the on-prem Vault'
-  Invoke-Edge 'vault read -field=type transit/keys/htx-kek || vault read transit/keys/htx-kek | head -6'
+  # Uses the scoped htx-toggle token (0440 root:edge, has read on transit/keys/htx-kek).
+  # VAULT_ADDR points at the plaintext local listener; the customer never sees a token
+  # value because we only ever read the token file at runtime and export it in the
+  # ssh session's memory. See docs/vault-token-runbook.md.
+  Invoke-Edge 'VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$(cat /etc/vault/htx-toggle-token)" vault read transit/keys/htx-kek | head -12'
 
   Show-StageLine 'Now look at what''s in Azure. Zero storage accounts holding customer data.'
   Wait-Gate 'ENTER to show the Azure state' | Out-Null
