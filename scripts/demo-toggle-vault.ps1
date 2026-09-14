@@ -119,17 +119,42 @@ fi
 $Block
 "@
 
-  # PowerShell here-strings on Windows produce CRLF line endings. When piped to
-  # a POSIX shell, the trailing \r attaches to each token -- e.g., `set -eu\r`
-  # becomes `set -eu<CR>` and bash sees the CR as part of the arg list, printing
-  # "invalid option: -". Normalize to LF before piping to ssh.
-  $remoteLf = $remote -replace "`r`n", "`n"
+  # POWERSHELL NEWLINE HANDLING (the bug that took two attempts to fix):
+  # PowerShell here-strings on Windows contain bare LF in memory. But when
+  # a string is piped to a NATIVE process's stdin (like ssh.exe), PowerShell's
+  # pipeline converts every LF to CRLF using [Console]::OutputEncoding line
+  # semantics. That CRLF stays attached on the far side and bash sees
+  # `set -eu<CR>` and prints "invalid option: -" then dies on unexpected EOF.
+  #
+  # A `-replace` on the string is a no-op because the string itself has LF only;
+  # the CRLF appears at the boundary between PowerShell and the native process.
+  #
+  # The fix is to bypass the native pipeline entirely: start ssh via
+  # System.Diagnostics.Process, get its raw stdin BaseStream, write LF-encoded
+  # UTF-8 bytes directly. No newline conversion happens because we never touch
+  # a StreamWriter or a PowerShell pipe.
+  $remoteLf = $remote -replace "`r`n", "`n"   # belt-and-suspenders; here-strings should already be LF
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($remoteLf)
 
-  # -T disables pseudo-tty allocation, keeps stdout clean and avoids ncurses
-  # escape sequences leaking into the banner output.
-  $remoteLf | ssh -T "$EdgeSshUser@$EdgeHost" 'bash -s'
-  if ($LASTEXITCODE -ne 0) {
-    throw "edge vault command failed (ssh exit $LASTEXITCODE). See stderr above."
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = 'ssh'
+  # -T disables pseudo-tty allocation, keeps stdout clean.
+  $psi.Arguments = "-T $EdgeSshUser@$EdgeHost `"bash -s`""
+  $psi.RedirectStandardInput = $true
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+
+  $proc = [System.Diagnostics.Process]::Start($psi)
+  try {
+    $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $proc.StandardInput.BaseStream.Flush()
+  } finally {
+    $proc.StandardInput.Close()   # signal EOF to bash -s
+  }
+  $proc.WaitForExit()
+
+  if ($proc.ExitCode -ne 0) {
+    throw "edge vault command failed (ssh exit $($proc.ExitCode)). See stderr above."
   }
 }
 
