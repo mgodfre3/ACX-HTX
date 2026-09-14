@@ -29,15 +29,40 @@ param(
   [string]$VaultName    = 'acxhtx-kv-aguuve6oq6by6',
   [string]$KeyName      = 'acxhtx-cvm-attestation-key',
 
-  # Egress subnet(s) to bump into the vault firewall for the duration of the toggle.
-  # Defaults cover the Microsoft corp NAT pool observed from the operator's dev machine.
-  # Extend or replace if your egress differs (e.g., add your home IP as /32).
+  # Additional egress subnet(s) to bump into the vault firewall for the duration
+  # of the toggle. The script auto-detects the operator's own egress IP (via
+  # api.ipify.org) and prepends it to this list unless -NoAutoDetectEgress is set.
+  # Historically-observed Microsoft corp NAT ranges are included as fallbacks so
+  # a run from a corp-connected session also works.
   [string[]]$FirewallSubnets = @('52.167.112.0/22', '52.177.0.0/16'),
 
+  [switch]$NoAutoDetectEgress,
   [switch]$SkipFirewallBump
 )
 
-$ErrorActionPreference = 'Stop'
+# NOTE: script-level $ErrorActionPreference is deliberately LEFT DEFAULT here.
+# A previous revision set it to 'Stop', which turned every non-zero az CLI exit
+# into a terminating error and unwound the retry loop in Set-KeyEnabled before
+# it could iterate -- silently. The whole point of that retry loop is to absorb
+# Azure Key Vault firewall propagation timing, so it MUST tolerate transient
+# ForbiddenByFirewall errors. Individual az calls check $LASTEXITCODE explicitly.
+
+if (-not $NoAutoDetectEgress) {
+  try {
+    $myIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=json' -TimeoutSec 5).ip
+    if ($myIp -match '^\d+\.\d+\.\d+\.\d+$') {
+      $mySubnet = "$myIp/32"
+      if ($FirewallSubnets -notcontains $mySubnet) {
+        Write-Host "Auto-detected operator egress IP: $myIp (adding as $mySubnet)" -ForegroundColor DarkGray
+        $FirewallSubnets = @($mySubnet) + $FirewallSubnets
+      }
+    } else {
+      Write-Host "Auto-detect returned unrecognized value: '$myIp' -- continuing with defaults." -ForegroundColor DarkYellow
+    }
+  } catch {
+    Write-Host "Auto-detect of egress IP failed ($($_.Exception.Message)) -- continuing with defaults." -ForegroundColor DarkYellow
+  }
+}
 
 az account set --subscription $Subscription | Out-Null
 
