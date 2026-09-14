@@ -5,10 +5,8 @@
 
 .DESCRIPTION
   Bumps the min_decryption_version on the Vault Transit key so subsequent unwrap
-  calls fail with a policy violation. This is the recoverable form of "disable
-  the key" and works on the demo lab immediately. For an even harder cut, add
-  -Delete which actually deletes the key (destructive -- requires re-seeding
-  videos afterward).
+  calls fail with a policy violation. This is a fully recoverable disable; run
+  the script again with -Enable to restore.
 
   SECURITY POSTURE (changed in this revision):
     The Vault token is stored ON THE EDGE at /etc/vault/htx-toggle-token (mode
@@ -21,20 +19,22 @@
       - update  transit/keys/htx-kek/rotate
       - update  transit/keys/htx-kek/config
       - read    transit/keys/htx-kek     (for inspecting latest_version)
-    It has no decrypt capability; only the edge-fetch service token can decrypt.
+    It has no decrypt capability and no delete capability. Only the edge-fetch
+    service token can decrypt; destructive key deletion is deliberately not
+    reachable from this script.
 
     Previous versions of this script required the Vault ROOT token to live in a
-    JSON file on the operator's laptop. That posture is now retired.
+    JSON file on the operator's laptop. That posture is now retired. Previous
+    versions also supported a -Delete switch that permanently deleted the key;
+    that switch has been removed because (a) the scoped policy doesn't permit
+    it, and (b) permanent deletion is never part of the on-stage demo -- only
+    the recoverable disable/enable cycle is.
 
 .PARAMETER Disable
   Bump min_decryption_version to invalidate all wrapped DEKs currently in flight.
 
 .PARAMETER Enable
   Reset min_decryption_version to 1 so unwrap works again.
-
-.PARAMETER Delete
-  Additive to -Disable. Marks the key deletable and deletes it. Destructive:
-  reseeding video envelopes is required after using this.
 
 .PARAMETER EdgeHost
   IP/hostname of the ALDO Vault VM. Default 172.22.218.200.
@@ -69,9 +69,6 @@ param(
 
   [Parameter(ParameterSetName='On', Mandatory=$true)]
   [switch]$Enable,
-
-  [Parameter(ParameterSetName='Off')]
-  [switch]$Delete,
 
   [string]$EdgeHost     = '172.22.218.200',
   [string]$EdgeSshUser  = 'edge',
@@ -110,7 +107,7 @@ function Invoke-EdgeVault {
   $remote = @"
 set -eu
 if [ ! -r '$TokenPath' ]; then
-  echo "edge: token file $TokenPath not readable by \$(id -un)" >&2
+  echo "edge: token file $TokenPath not readable by `$(id -un)" >&2
   exit 65
 fi
 export VAULT_ADDR='$VaultAddr'
@@ -141,16 +138,6 @@ CUR=`$(vault read -format=json transit/keys/$KeyName | jq -r .data.latest_versio
 vault write transit/keys/$KeyName/config min_decryption_version=`$CUR
 echo "edge: min_decryption_version bumped to `$CUR"
 "@
-
-  if ($Delete) {
-    Invoke-EdgeVault -Block @"
-vault write transit/keys/$KeyName/config deletion_allowed=true >/dev/null
-vault delete transit/keys/$KeyName
-echo "edge: key deleted (irrecoverable)"
-"@
-    Write-Banner "EDGE VAULT: $KeyName DELETED (destructive - reseed required)" Red
-    return
-  }
 
   Write-Banner "EDGE VAULT: $KeyName DISABLED (min_decryption_version bumped)" Red
   Write-Host "All previously-wrapped DEKs are now inert. Restore with -Enable." -ForegroundColor Yellow
